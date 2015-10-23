@@ -1,0 +1,3 @@
+[submodule "reicast-emulator"]
+	path = reicast-emulator
+	url = https://github.com/reicast/reicast-emulator.git
