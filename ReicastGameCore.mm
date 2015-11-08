@@ -202,6 +202,11 @@ void gl_swap() {
     return OEGameCoreRenderingOpenGL3Video;
 }
 
+- (BOOL)needsDoubleBufferedFBO
+{
+    return YES;
+}
+
 - (OEIntSize)bufferSize
 {
     return OEIntSizeMake(videoWidth, videoHeight);
@@ -358,6 +363,8 @@ void handle_trig(u8* dckey, int state, int player)
 
 - (oneway void)didReleaseDCButton:(OEDCButton)button forPlayer:(NSUInteger)player
 {
+    // FIXME: Dpad up/down seems to get set and released on the same frame, making it not do anything.
+    // Need to ensure actions last across a frame?
     switch (button) {
         case OEDCButtonUp:
             handle_key(DPad_Up, 0, (int)player);
