@@ -26,11 +26,13 @@
 
 #import "ReicastGameCore.h"
 #import <OpenEmuBase/OERingBuffer.h>
-#import <OpenGL/gl.h>
+#import <OpenGL/gl3.h>
 
 #include "oslib/audiostream.h"
 #include "audiobackend_openemu.h"
+
 #include "types.h"
+#include "rend/rend.h"
 #include <sys/stat.h>
 
 #define SAMPLERATE 44100
@@ -41,6 +43,9 @@
     uint16_t *_soundBuffer;
     int videoWidth, videoHeight;
     NSString *romPath;
+    NSString *romFile;
+
+    GLuint iFBO;
 }
 @end
 
@@ -97,18 +102,32 @@ int darw_printf(const wchar* text,...) {
     return 0;
 }
 
+void common_linux_setup();
 int dc_init(int argc,wchar* argv[]);
 void dc_run();
 void dc_term();
+void dc_stop();
 
 volatile bool has_init = false;
 - (void)emuthread {
     settings.profile.run_counts = 0;
-
-    mkdir([[self batterySavesDirectoryPath] UTF8String], 0755);
-    set_user_config_dir([[self batterySavesDirectoryPath] UTF8String]);
-    set_user_data_dir([[self biosDirectoryPath] UTF8String]);
-
+    common_linux_setup();
+    
+    // Set battery save dir
+    NSURL *SavesDirectory = [NSURL fileURLWithPath:[self batterySavesDirectoryPath]];
+    
+    // create the data directory
+   [[NSFileManager defaultManager] createDirectoryAtURL:[[NSURL fileURLWithPath:[self supportDirectoryPath]] URLByAppendingPathComponent:@"data"] withIntermediateDirectories:YES attributes:nil error:nil];
+    
+    //create the save direcory for the game
+    [[NSFileManager defaultManager] createDirectoryAtURL:[SavesDirectory URLByAppendingPathComponent:romFile] withIntermediateDirectories:YES attributes:nil error:nil];
+    
+    
+    set_user_config_dir([[self supportDirectoryPath] UTF8String]);
+    set_user_data_dir([SavesDirectory URLByAppendingPathComponent:romFile].path.fileSystemRepresentation);
+    add_system_data_dir([[self biosDirectoryPath] fileSystemRepresentation]);
+    add_system_config_dir([[self biosDirectoryPath] fileSystemRepresentation]);
+    
     char* argv[] = { "reicast", (char*)[romPath UTF8String] };
     dc_init(2,argv);
 
@@ -119,7 +138,12 @@ volatile bool has_init = false;
 
 - (BOOL)loadFileAtPath:(NSString *)path error:(NSError **)error
 {
+    romFile = [[path lastPathComponent] stringByDeletingPathExtension];
+
+    printf(" OPENEMU romFile %s\n", [romFile UTF8String]);
+    
     romPath = path;
+    
     return YES;
 }
 
@@ -128,6 +152,9 @@ volatile bool has_init = false;
     screen_width = videoWidth;
     screen_height = videoHeight;
     RegisterAudioBackend(&audiobackend_openemu);
+    
+    //Disable the OE framelimiting
+    [self.renderDelegate suspendFPSLimiting];
 }
 
 - (void)stopEmulation
@@ -138,7 +165,6 @@ volatile bool has_init = false;
 
 - (void)resetEmulation
 {
-    
 }
 
 - (void)executeFrame
@@ -151,30 +177,60 @@ volatile bool has_init = false;
         while (!has_init) {;}
     }
     
-    while (rend_single_frame() == 0) {}
+    //glBindFramebuffer(GL_FRAMEBUFFER,(GLuint)[[self.renderDelegate presentationFramebuffer] integerValue]);
+    [self.renderDelegate presentDoubleBufferedFBO];
+    
+    while (!rend_framePending()){;}
+
+    while(!rend_single_frame()) {;};
+    
+    calcFPS();
 }
 
 # pragma mark - Video
 
 extern int screen_width,screen_height;
+bool rend_framePending();
 bool rend_single_frame();
 bool gles_init();
+double emuFrameInterval = 60;
 
+void calcFPS(){
+    const int spg_clks[4] = { 26944080, 13458568, 13462800, 26944080 };
+    u32 pixel_clock = spg_clks[(SPG_CONTROL.full >> 6) & 3];
+    
+    switch (pixel_clock)
+    {
+        case 26944080:
+            emuFrameInterval = 60.00;
+            //info->timing.fps = 60.00; /* (VGA  480 @ 60.00) */
+            break;
+        case 26917135:
+            emuFrameInterval = 59.94;
+            //info->timing.fps = 59.94; /* (NTSC 480 @ 59.94) */
+            break;
+        case 13462800:
+            emuFrameInterval = 50.00;
+            // info->timing.fps = 50.00; /* (PAL 240  @ 50.00) */
+            break;
+        case 13458568:
+            emuFrameInterval = 59.94;
+            // info->timing.fps = 59.94; /* (NTSC 240 @ 59.94) */
+            break;
+        case 25925600:
+            emuFrameInterval = 50.00;
+            //info->timing.fps = 50.00; /* (PAL 480  @ 50.00) */
+            break;
+    }
+}
 void os_SetWindowText(const char * text) {
     puts(text);
 }
 
 void os_DoEvents() {
-    
-}
-
-
-void UpdateInputState(u32 port) {
-    
 }
 
 void os_CreateWindow() {
-    
 }
 
 void* libPvr_GetRenderTarget() {
@@ -194,7 +250,7 @@ void gl_term() {
 }
 
 void gl_swap() {
-    
+    glFlush();
 }
 
 - (OEGameCoreRendering)gameCoreRendering
@@ -212,14 +268,14 @@ void gl_swap() {
     return OEIntSizeMake(videoWidth, videoHeight);
 }
 
-//- (OEIntSize)aspectSize
-//{
-//    return OEIntSizeMake(16, 9);
-//}
+- (OEIntSize)aspectSize
+{
+    return OEIntSizeMake(4, 3);
+}
 
 - (NSTimeInterval)frameInterval
 {
-    return 60;
+    return emuFrameInterval;
 }
 
 # pragma mark - Audio
@@ -281,6 +337,18 @@ enum DCPad
     Axis_X= 0x20000,
     Axis_Y= 0x20001,
 };
+
+void os_SetupInput() {
+//#if DC_PLATFORM == DC_PLATFORM_DREAMCAST
+  // mcfg_CreateDevicesFromConfig();
+//#endif
+}
+
+void UpdateInputState(u32 port) {
+}
+
+void UpdateVibration(u32 port, u32 value) {
+}
 
 void handle_key(int dckey, int state, int player)
 {
