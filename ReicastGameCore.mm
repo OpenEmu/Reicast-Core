@@ -35,7 +35,9 @@
 #include "rend/rend.h"
 #include <sys/stat.h>
 #include <functional>
+
 #include "maple_cfg.h"
+#include "cfg.h"
 
 #define SAMPLERATE 44100
 #define SIZESOUNDBUFFER 44100 / 60 * 4
@@ -162,6 +164,9 @@ volatile bool has_init = false;
     screen_height = videoHeight;
     RegisterAudioBackend(&audiobackend_openemu);
     
+    // Set player to 4
+    cfgSaveInt("players", "nb", 4);
+    
     //Disable the OE framelimiting
     [self.renderDelegate suspendFPSLimiting];
 }
@@ -184,7 +189,6 @@ volatile bool has_init = false;
         [NSThread detachNewThreadSelector:@selector(emuthread) toTarget:self withObject:nil];
 
         while (!has_init) { ; }
-        
     }
     
     //glBindFramebuffer(GL_FRAMEBUFFER,(GLuint)[[self.renderDelegate presentationFramebuffer] integerValue]);
