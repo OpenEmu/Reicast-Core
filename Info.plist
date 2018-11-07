@@ -30,8 +30,6 @@
 		<dict>
 			<key>OEGameCoreHasGlitches</key>
 			<true/>
-			<key>OEGameCoreSaveStatesNotSupported</key>
-			<true/>
 		</dict>
 	</dict>
 	<key>OEGameCorePlayerCount</key>
