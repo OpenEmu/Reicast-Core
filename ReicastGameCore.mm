@@ -34,9 +34,15 @@
 #include "types.h"
 #include "rend/rend.h"
 #include <sys/stat.h>
+#include <functional>
+#include "maple_cfg.h"
 
 #define SAMPLERATE 44100
 #define SIZESOUNDBUFFER 44100 / 60 * 4
+
+typedef std::function<void(bool status, const std::string &message, void *cbUserData)> Callback;
+void dc_savestate(const std::string &fileName, Callback callback, void *cbUserData);
+void dc_loadstate(const std::string &fileName, Callback callback, void *cbUserData);
 
 @interface ReicastGameCore () <OEDCSystemResponderClient>
 {
@@ -44,12 +50,16 @@
     int videoWidth, videoHeight;
     NSString *romPath;
     NSString *romFile;
-
+    NSString *autoLoadStatefileName;
+    
     GLuint iFBO;
 }
 @end
 
 __weak ReicastGameCore *_current;
+
+//void dc_savestate(string fileName);
+//void dc_loadstate(string fileName);
 
 @implementation ReicastGameCore
 
@@ -122,7 +132,6 @@ volatile bool has_init = false;
     //create the save direcory for the game
     [[NSFileManager defaultManager] createDirectoryAtURL:[SavesDirectory URLByAppendingPathComponent:romFile] withIntermediateDirectories:YES attributes:nil error:nil];
     
-    
     set_user_config_dir([[self supportDirectoryPath] UTF8String]);
     set_user_data_dir([SavesDirectory URLByAppendingPathComponent:romFile].path.fileSystemRepresentation);
     add_system_data_dir([[self biosDirectoryPath] fileSystemRepresentation]);
@@ -132,7 +141,7 @@ volatile bool has_init = false;
     dc_init(2,argv);
 
     has_init = true;
-
+    
     dc_run();
 }
 
@@ -174,7 +183,8 @@ volatile bool has_init = false;
 
         [NSThread detachNewThreadSelector:@selector(emuthread) toTarget:self withObject:nil];
 
-        while (!has_init) {;}
+        while (!has_init) { ; }
+        
     }
     
     //glBindFramebuffer(GL_FRAMEBUFFER,(GLuint)[[self.renderDelegate presentationFramebuffer] integerValue]);
@@ -182,7 +192,7 @@ volatile bool has_init = false;
     
     while (!rend_framePending()){;}
 
-    while(!rend_single_frame()) {;};
+    while (!rend_single_frame()) {;};
     
     calcFPS();
 }
@@ -292,15 +302,47 @@ void gl_swap() {
 
 # pragma mark - Save States
 
-// Save State is not implemented by Reicast at this time
-- (BOOL)saveStateToFileAtPath: (NSString *) fileName
+- (void)autoloadWaitThread
 {
-    return NO;
+    @autoreleasepool
+    {
+        //Wait here until we get the signal for full initialization
+        while (!has_init)
+            usleep (10000);
+        
+        dc_loadstate(autoLoadStatefileName.fileSystemRepresentation, nil ,nil);
+    }
 }
 
-- (BOOL)loadStateFromFileAtPath: (NSString *) fileName
+static void _OESaveStateCallback(bool status, std::string message, void *cbUserData)
 {
-    return NO;
+    void (^block)(BOOL, NSError *) = (__bridge_transfer void(^)(BOOL, NSError *))cbUserData;
+    
+    [_current endPausedExecution];
+    
+    block(status, nil);
+}
+
+- (void)saveStateToFileAtPath:(NSString *)fileName completionHandler:(void (^)(BOOL, NSError *))block
+{
+    if (has_init) {
+        [self beginPausedExecution];
+        dc_savestate(fileName.fileSystemRepresentation, _OESaveStateCallback, (__bridge_retained void *)[block copy]);
+    }
+}
+
+- (void)loadStateFromFileAtPath:(NSString *)fileName completionHandler:(void (^)(BOOL, NSError *))block
+{
+    if (!has_init) {
+        //Start a separate thread to load
+        autoLoadStatefileName = fileName;
+        
+        [NSThread detachNewThreadSelector:@selector(autoloadWaitThread) toTarget:self withObject:nil];
+        block(true, nil);
+    } else {
+        [self beginPausedExecution];
+        dc_loadstate(fileName.fileSystemRepresentation, _OESaveStateCallback, (__bridge_retained void *)[block copy]);
+    }
 }
 
 # pragma mark - Input
@@ -340,7 +382,7 @@ enum DCPad
 
 void os_SetupInput() {
 //#if DC_PLATFORM == DC_PLATFORM_DREAMCAST
-  // mcfg_CreateDevicesFromConfig();
+  mcfg_CreateDevicesFromConfig();
 //#endif
 }
 
