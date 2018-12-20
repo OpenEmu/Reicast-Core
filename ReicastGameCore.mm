@@ -191,8 +191,12 @@ volatile bool has_init = false;
         while (!has_init) { ; }
     }
     
-    //glBindFramebuffer(GL_FRAMEBUFFER,(GLuint)[[self.renderDelegate presentationFramebuffer] integerValue]);
-    [self.renderDelegate presentDoubleBufferedFBO];
+    
+    if (self.needsDoubleBufferedFBO) {
+        [self.renderDelegate presentDoubleBufferedFBO];
+    } else {
+        glBindFramebuffer(GL_FRAMEBUFFER,(GLuint)[[self.renderDelegate presentationFramebuffer] integerValue]);
+    }
     
     while (!rend_framePending()){;}
 
