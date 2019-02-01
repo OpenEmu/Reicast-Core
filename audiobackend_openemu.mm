@@ -9,15 +9,15 @@
 uint waitime, lastwaitime;
 
 mach_timebase_info_data_t info;
-uint64_t start;
-uint64_t duration;
+uint64_t epochStart;
+uint64_t epochDuration;
 
 double durationMultiplier;
 
 static void openemu_init()
 {
     mach_timebase_info(&info);
-    start = mach_absolute_time();
+    epochStart = mach_absolute_time();
     lastwaitime = 0;
     durationMultiplier =  (info.numer/ info.denom) / 1000.0 ;  //Converts mach time to microseconds
 }
@@ -39,22 +39,22 @@ static u32 openemu_push(void* frame, u32 samples, bool wait)
     uint64_t MaxFrameTime = SingleFrameTime * PercentOfFrameWithSound ;
     
     //Figure out the time since the last partial frame of sound played
-    duration = mach_absolute_time() - start;
+    epochDuration = mach_absolute_time() - epochStart;
     
     //start the next epoch
-    start = mach_absolute_time();
+    epochStart = mach_absolute_time();
     
     //Write the sound bytes to the buffer
     [[_current audioBufferAtIndex:0] write:frame maxLength:(size_t)samples * 4];
     
     /* Convert to microeconds */
-    duration *= durationMultiplier;
-    duration -= lastwaitime;
+    epochDuration *= durationMultiplier;
+    epochDuration -= lastwaitime;
     
     //If duration was less than max time for sound play, subtract the duration from the max time, and wait the remainder
     //   else no wait is neccessary
-    if (duration < MaxFrameTime)
-        waitime = (uint)(MaxFrameTime - duration);
+    if (epochDuration < MaxFrameTime)
+        waitime = (uint)(MaxFrameTime - epochDuration);
     else
         waitime = 0;
    
