@@ -33,9 +33,10 @@ Callback OECallback;
 void *OEUserData;
 
 settings_t settings;
-static bool performed_serialization = false;
+static bool continue_running = false;
 static cMutex mtx_serialization ;
 static cMutex mtx_mainloop ;
+static int new_dynarec_setting = -1;
 
 /*
  libndc
@@ -73,15 +74,15 @@ int64_t get_time_usec(void)
     
     /* Frequency is guaranteed to not change. */
     if (!freq.QuadPart && !QueryPerformanceFrequency(&freq))
-    return 0;
+        return 0;
     
     if (!QueryPerformanceCounter(&count))
-    return 0;
+        return 0;
     return count.QuadPart * 1000000 / freq.QuadPart;
 #elif defined(_POSIX_MONOTONIC_CLOCK) || defined(__QNX__) || defined(ANDROID) || defined(__MACH__) || HOST_OS==OS_LINUX
     struct timespec tv = {0};
     if (clock_gettime(CLOCK_MONOTONIC, &tv) < 0)
-    return 0;
+        return 0;
     return tv.tv_sec * INT64_C(1000000) + (tv.tv_nsec + 500) / 1000;
 #elif defined(EMSCRIPTEN)
     return emscripten_get_now() * 1000;
@@ -131,22 +132,22 @@ s32 plugins_Init()
 {
     
     if (s32 rv = libPvr_Init())
-    return rv;
+        return rv;
     
 #ifndef TARGET_DISPFRAME
     if (s32 rv = libGDR_Init())
-    return rv;
+        return rv;
 #endif
 #if DC_PLATFORM == DC_PLATFORM_NAOMI || DC_PLATFORM == DC_PLATFORM_ATOMISWAVE
     if (!naomi_cart_SelectFile(libPvr_GetRenderTarget()))
-    return rv_serror;
+        return rv_serror;
 #endif
     
     if (s32 rv = libAICA_Init())
-    return rv;
+        return rv;
     
     if (s32 rv = libARM_Init())
-    return rv;
+        return rv;
     
     //if (s32 rv = libExtDevice_Init())
     //    return rv;
@@ -189,16 +190,18 @@ cThread webui_thd(&webui_th,0);
 void LoadSpecialSettings()
 {
 #if DC_PLATFORM == DC_PLATFORM_DREAMCAST
+    printf("Game ID is [%s]\n", reios_product_number);
+    
     // Tony Hawk's Pro Skater 2
     if (!strncmp("T13008D", reios_product_number, 7) || !strncmp("T13006N", reios_product_number, 7)
         // Tony Hawk's Pro Skater 1
         || !strncmp("T40205N", reios_product_number, 7)
         // Tony Hawk's Skateboarding
         || !strncmp("T40204D", reios_product_number, 7))
-    settings.rend.RenderToTextureBuffer = 1;
+        settings.rend.RenderToTextureBuffer = 1;
     if (!strncmp("HDR-0176", reios_product_number, 8) || !strncmp("RDC-0057", reios_product_number, 8))
-    // Cosmic Smash
-    settings.rend.TranslucentPolygonDepthMask = 1;
+        // Cosmic Smash
+        settings.rend.TranslucentPolygonDepthMask = 1;
     // Pro Pinball Trilogy
     if (!strncmp("T30701D", reios_product_number, 7)
         // Demolition Racer
@@ -215,7 +218,15 @@ void LoadSpecialSettings()
         printf("Enabling Dynarec safe mode for game %s\n", reios_product_number);
         settings.dynarec.safemode = 1;
     }
+    // NHL 2K2
+    if (!strncmp("MK-51182", reios_product_number, 8))
+    {
+        printf("Enabling Extra depth scaling for game %s\n", reios_product_number);
+        settings.rend.ExtraDepthScale = 10000;
+    }
 #elif DC_PLATFORM == DC_PLATFORM_NAOMI || DC_PLATFORM == DC_PLATFORM_ATOMISWAVE
+    printf("Game ID is [%s]\n", naomi_game_id);
+    
     if (!strcmp("METAL SLUG 6", naomi_game_id) || !strcmp("WAVE RUNNER GP", naomi_game_id))
     {
         printf("Enabling Dynarec safe mode for game %s\n", naomi_game_id);
@@ -231,7 +242,8 @@ void LoadSpecialSettings()
         || !strcmp("SHOOTOUT POOL", naomi_game_id)
         || !strcmp("OUTTRIGGER     JAPAN", naomi_game_id)
         || !strcmp("CRACKIN'DJ  ver JAPAN", naomi_game_id)
-        || !strcmp("CRACKIN'DJ PART2  ver JAPAN", naomi_game_id))
+        || !strcmp("CRACKIN'DJ PART2  ver JAPAN", naomi_game_id)
+        || !strcmp("KICK '4' CASH", naomi_game_id))
     {
         printf("Enabling JVS rotary encoders for game %s\n", naomi_game_id);
         settings.input.JammaSetup = 2;
@@ -250,6 +262,16 @@ void LoadSpecialSettings()
     {
         printf("Enabling specific JVS setup for game %s\n", naomi_game_id);
         settings.input.JammaSetup = 4;
+    }
+    else if (!strcmp("NINJA ASSAULT", naomi_game_id))
+    {
+        printf("Enabling specific JVS setup for game %s\n", naomi_game_id);
+        settings.input.JammaSetup = 5;
+    }
+    else if (!strcmp(" BIOHAZARD  GUN SURVIVOR2", naomi_game_id))
+    {
+        printf("Enabling specific JVS setup for game %s\n", naomi_game_id);
+        settings.input.JammaSetup = 7;
     }
     if (!strcmp("COSMIC SMASH IN JAPAN", naomi_game_id))
     {
@@ -346,7 +368,7 @@ int dc_init(int argc,wchar* argv[])
         //          load the users saved nnvram
         LoadNVmem(get_writable_data_path("/data/"));
     }
-    
+
     if (plugins_Init())
     {
 #if defined(_ANDROID)
@@ -364,35 +386,43 @@ int dc_init()
 {
     int rv = 0;
     if (reios_init_value != 0)
-    return reios_init_value;
+        return reios_init_value;
+    LoadSpecialSettings();
 #else
     LoadCustom();
 #endif
     
 #if FEAT_SHREC != DYNAREC_NONE
+    Get_Sh4Recompiler(&sh4_cpu);
+    sh4_cpu.Init();        // Also initialize the interpreter
+
     if(settings.dynarec.Enable)
     {
-        Get_Sh4Recompiler(&sh4_cpu);
+       
         printf("Using Recompiler\n");
     }
     else
 #endif
     {
         Get_Sh4Interpreter(&sh4_cpu);
+#if FEAT_SHREC == DYNAREC_NONE
+        sh4_cpu.Init();
+#endif
         printf("Using Interpreter\n");
     }
     
     InitAudio();
-    
-    sh4_cpu.Init();
+
     mem_Init();
     
     mem_map_default();
     
     os_SetupInput();
     
-#if DC_PLATFORM == DC_PLATFORM_NAOMI || DC_PLATFORM == DC_PLATFORM_ATOMISWAVE
+#if DC_PLATFORM == DC_PLATFORM_NAOMI
     mcfg_CreateNAOMIJamma();
+#elif DC_PLATFORM == DC_PLATFORM_ATOMISWAVE
+    mcfg_CreateAtomisWaveControllers();
 #endif
     
     dc_reset();
@@ -410,7 +440,7 @@ void dc_run()
 {
     while ( true )
     {
-        performed_serialization = false ;
+        continue_running = false ;
         mtx_mainloop.Lock() ;
         sh4_cpu.Run();
         mtx_mainloop.Unlock() ;
@@ -418,8 +448,23 @@ void dc_run()
         mtx_serialization.Lock() ;
         mtx_serialization.Unlock() ;
         
-        if (!performed_serialization)
-        break ;
+        if (new_dynarec_setting != -1 && new_dynarec_setting != settings.dynarec.Enable)
+        {
+            settings.dynarec.Enable = new_dynarec_setting;
+            if (settings.dynarec.Enable)
+            {
+                Get_Sh4Recompiler(&sh4_cpu);
+                printf("Using Recompiler\n");
+            }
+            else
+            {
+                Get_Sh4Interpreter(&sh4_cpu);
+                printf("Using Interpreter\n");
+            }
+            sh4_cpu.ResetCache();
+        }
+        if (!continue_running)
+            break ;
     }
 }
 #endif
@@ -466,6 +511,7 @@ void dc_start()
 
 void LoadSettings()
 {
+    settings.dreamcast.RTC            = GetRTC_now();
 #ifndef _ANDROID
     settings.dynarec.Enable            = cfgLoadInt("config","Dynarec.Enabled", 1)!=0;
     settings.dynarec.idleskip        = cfgLoadInt("config","Dynarec.idleskip",1)!=0;
@@ -473,9 +519,9 @@ void LoadSettings()
     settings.dynarec.safemode        = cfgLoadInt("config", "Dynarec.safe-mode", 0);
     //disable_nvmem can't be loaded, because nvmem init is before cfg load
     settings.dreamcast.cable        = cfgLoadInt("config","Dreamcast.Cable",3);
-    settings.dreamcast.RTC            = cfgLoadInt("config","Dreamcast.RTC",GetRTC_now());
     settings.dreamcast.region        = cfgLoadInt("config","Dreamcast.Region",3);
     settings.dreamcast.broadcast    = cfgLoadInt("config","Dreamcast.Broadcast",4);
+    settings.dreamcast.language     = cfgLoadInt("config","Dreamcast.Language", 6);
     settings.aica.LimitFPS            = cfgLoadInt("config","aica.LimitFPS",1);
     settings.aica.NoBatch            = cfgLoadInt("config","aica.NoBatch",0);
     settings.aica.NoSound            = cfgLoadInt("config","aica.NoSound",0);
@@ -493,7 +539,9 @@ void LoadSettings()
     cfgLoadStr("config","rend.ExtraDepthScale", extra_depth_scale_str, "1");
     settings.rend.ExtraDepthScale = atof(extra_depth_scale_str);
     if (settings.rend.ExtraDepthScale == 0)
-    settings.rend.ExtraDepthScale = 1.f;
+        settings.rend.ExtraDepthScale = 1.f;
+    settings.rend.CustomTextures = cfgLoadInt("config", "rend.CustomTextures", 0);
+    settings.rend.DumpTextures = cfgLoadInt("config", "rend.DumpTextures", 0);
     
     settings.pvr.subdivide_transp    = cfgLoadInt("config","pvr.Subdivide",0);
     
@@ -517,6 +565,8 @@ void LoadSettings()
 #else
     // TODO Expose this with JNI
     settings.rend.Clipping = 1;
+    settings.rend.RenderToTextureUpscale = 1;
+    settings.rend.TextureUpscale = 1;
     
     // Configured on a per-game basis
     settings.rend.ExtraDepthScale = 1.f;
@@ -559,9 +609,9 @@ void LoadCustom()
     
     char *p = reios_id + strlen(reios_id) - 1;
     while (p >= reios_id && *p == ' ')
-    *p-- = '\0';
+        *p-- = '\0';
     if (*p == '\0')
-    return;
+        return;
 #elif DC_PLATFORM == DC_PLATFORM_NAOMI || DC_PLATFORM == DC_PLATFORM_ATOMISWAVE
     char *reios_id = naomi_game_id;
     char *reios_software_name = naomi_game_id;
@@ -570,7 +620,7 @@ void LoadCustom()
     LoadSpecialSettings();    // Default per-game settings
     
     if (reios_software_name[0] != '\0')
-    cfgSaveStr(reios_id, "software.name", reios_software_name);
+        cfgSaveStr(reios_id, "software.name", reios_software_name);
     settings.dynarec.Enable        = cfgGameInt(reios_id,"Dynarec.Enabled", settings.dynarec.Enable ? 1 : 0) != 0;
     settings.dynarec.idleskip    = cfgGameInt(reios_id,"Dynarec.idleskip", settings.dynarec.idleskip ? 1 : 0) != 0;
     settings.dynarec.unstable_opt    = cfgGameInt(reios_id,"Dynarec.unstable-opt", settings.dynarec.unstable_opt);
@@ -597,7 +647,6 @@ void SaveSettings()
     cfgSaveInt("config","Dynarec.Enabled",        settings.dynarec.Enable);
 #if DC_PLATFORM == DC_PLATFORM_DREAMCAST
     cfgSaveInt("config","Dreamcast.Cable",        settings.dreamcast.cable);
-    cfgSaveInt("config","Dreamcast.RTC",        settings.dreamcast.RTC);
     cfgSaveInt("config","Dreamcast.Region",        settings.dreamcast.region);
     cfgSaveInt("config","Dreamcast.Broadcast",    settings.dreamcast.broadcast);
 #endif
@@ -632,24 +681,48 @@ bool acquire_mainloop_lock()
     return result ;
 }
 
+void dc_enable_dynarec(bool enable)
+{
+#if FEAT_SHREC != DYNAREC_NONE
+    continue_running = true;
+    new_dynarec_setting = enable;
+    dc_stop();
+#endif
+}
+
 void cleanup_serialize(void *data)
 {
     if ( data != NULL )
-    free(data) ;
+        free(data) ;
     
-    performed_serialization = true ;
-    dc_start() ;
+    continue_running = true ;
     mtx_serialization.Unlock() ;
     mtx_mainloop.Unlock() ;
+    
 }
 
 static string get_savestate_file_path()
 {
-    return OEStateFilePath;
+    //OpenEmu:
+     return OEStateFilePath;
+    
+//    char image_path[512];
+//    cfgLoadStr("config", "image", image_path, "./");
+//    string state_file = image_path;
+//    size_t lastindex = state_file.find_last_of("/");
+//    if (lastindex != -1)
+//        state_file = state_file.substr(lastindex + 1);
+//    lastindex = state_file.find_last_of(".");
+//    if (lastindex != -1)
+//        state_file = state_file.substr(0, lastindex);
+//    state_file = state_file + ".state";
+//    return get_writable_data_path("/data/") + state_file;
 }
 
 void* dc_savestate_thread(void* p)
 {
+    printf("Starting SaveState.\n") ;
+    
     string filename;
     unsigned int total_size = 0 ;
     void *data = NULL ;
@@ -660,6 +733,7 @@ void* dc_savestate_thread(void* p)
     if ( !wait_until_dc_running()) {
         printf("Failed to save state - dc loop kept running\n") ;
         mtx_serialization.Unlock() ;
+        
         if (OECallback) OECallback(false, "Failed to load state - dc loop kept running", OEUserData);
         return NULL;
     }
@@ -669,9 +743,9 @@ void* dc_savestate_thread(void* p)
     if ( !acquire_mainloop_lock() )
     {
         printf("Failed to save state - could not acquire main loop lock\n") ;
-        performed_serialization = true ;
-        dc_start() ;
+        continue_running = true ;
         mtx_serialization.Unlock() ;
+        
         if (OECallback) OECallback(false, "Failed to load state - could not acquire main loop lock", OEUserData);
         return NULL;
     }
@@ -680,7 +754,8 @@ void* dc_savestate_thread(void* p)
     {
         printf("Failed to save state - could not initialize total size\n") ;
         cleanup_serialize(data) ;
-        if (OECallback)  OECallback(false, "Failed to load state - could not initialize total sizey", OEUserData);
+        
+        if (OECallback) OECallback(false, "Failed to save state - could not initialize total size.", OEUserData);
         return NULL;
     }
     
@@ -689,6 +764,7 @@ void* dc_savestate_thread(void* p)
     {
         printf("Failed to save state - could not malloc %d bytes", total_size) ;
         cleanup_serialize(data) ;
+        
         if (OECallback) OECallback(false, "Failed to load state - could not allocate Memory", OEUserData);
         return NULL;
     }
@@ -699,6 +775,7 @@ void* dc_savestate_thread(void* p)
     {
         printf("Failed to save state - could not serialize data\n") ;
         cleanup_serialize(data) ;
+        
         if (OECallback) OECallback(false, "Failed to load state - could not serialize data", OEUserData);
         return NULL;
     }
@@ -710,6 +787,7 @@ void* dc_savestate_thread(void* p)
     {
         printf("Failed to save state - could not open %s for writing\n", filename.c_str()) ;
         cleanup_serialize(data) ;
+        
         if (OECallback) OECallback(false, "Failed to load state - could not open file for writing", OEUserData);
         return NULL;
     }
@@ -719,6 +797,7 @@ void* dc_savestate_thread(void* p)
     
     cleanup_serialize(data) ;
     printf("Saved state to %s\n size %d", filename.c_str(), total_size) ;
+    
     if (OECallback) OECallback(true, "Successfully Saved State", OEUserData);
     return NULL;
 }
@@ -735,6 +814,7 @@ void* dc_loadstate_thread(void* p)
     if ( !wait_until_dc_running()) {
         printf("Failed to load state - dc loop kept running\n") ;
         mtx_serialization.Unlock() ;
+        
         if (OECallback) OECallback(false, "Failed to load state. Error in the file system.", OEUserData);
         return NULL;
     }
@@ -744,9 +824,9 @@ void* dc_loadstate_thread(void* p)
     if ( !acquire_mainloop_lock() )
     {
         printf("Failed to load state - could not acquire main loop lock\n") ;
-        performed_serialization = true ;
-        dc_start() ;
+        continue_running = true ;
         mtx_serialization.Unlock() ;
+        
         if (OECallback) OECallback(false, "Failed to load state - could not acquire main loop lock.", OEUserData);
         return NULL;
     }
@@ -755,7 +835,8 @@ void* dc_loadstate_thread(void* p)
     {
         printf("Failed to load state - could not initialize total size\n") ;
         cleanup_serialize(data) ;
-        if (OECallback) OECallback(false, "ailed to load state - could not initialize total size.", OEUserData);
+        
+        if (OECallback) OECallback(false, "Failed to load state - could not initialize total size.", OEUserData);
         return NULL;
     }
     
@@ -764,6 +845,7 @@ void* dc_loadstate_thread(void* p)
     {
         printf("Failed to load state - could not malloc %d bytes", total_size) ;
         cleanup_serialize(data) ;
+        
         if (OECallback) OECallback(false, "Failed to load state - could not allocate Memory", OEUserData);
         return NULL;
     }
@@ -775,6 +857,7 @@ void* dc_loadstate_thread(void* p)
     {
         printf("Failed to load state - could not open %s for reading\n", filename.c_str()) ;
         cleanup_serialize(data) ;
+        
         if (OECallback) OECallback(false, "Failed to load state - could not open file for readming", OEUserData);
         return NULL;
     }
@@ -794,6 +877,7 @@ void* dc_loadstate_thread(void* p)
     {
         printf("Failed to load state - could not unserialize data\n") ;
         cleanup_serialize(data) ;
+        
         if (OECallback) OECallback(false, "Failed to load state - could not unserialize data", OEUserData);
         return NULL;
     }
@@ -809,13 +893,15 @@ void* dc_loadstate_thread(void* p)
     return NULL;
 }
 
-
+//  OpenEmu SaveState functions
 void dc_savestate(const std::string &fileName, Callback callback, void *cbUserData)
 {
+    printf("Called Save Svaestate\n") ;
+    
     OECallback = callback;
     OEUserData = cbUserData;
     OEStateFilePath = fileName;
-    
+
     cThread thd(dc_savestate_thread,0);
     thd.Start() ;
 }
@@ -825,7 +911,7 @@ void dc_loadstate(const std::string &fileName, Callback callback, void *cbUserDa
     OECallback = callback;
     OEUserData = cbUserData;
     OEStateFilePath = fileName;
-    
+
     cThread thd(dc_loadstate_thread,0);
     thd.Start() ;
 }
