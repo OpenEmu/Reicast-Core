@@ -150,9 +150,6 @@ volatile bool has_init = false;
 - (BOOL)loadFileAtPath:(NSString *)path error:(NSError **)error
 {
     romFile = [[path lastPathComponent] stringByDeletingPathExtension];
-
-    printf(" OPENEMU romFile %s\n", [romFile UTF8String]);
-    
     romPath = path;
     
     return YES;
@@ -335,6 +332,7 @@ static void _OESaveStateCallback(bool status, std::string message, void *cbUserD
 {
     if (has_init) {
         [self beginPausedExecution];
+
         dc_savestate(fileName.fileSystemRepresentation, _OESaveStateCallback, (__bridge_retained void *)[block copy]);
     }
 }
@@ -388,17 +386,14 @@ enum DCPad
     Axis_Y= 0x20001,
 };
 
-void os_SetupInput() {
-//#if DC_PLATFORM == DC_PLATFORM_DREAMCAST
+void os_SetupInput()
+{
   mcfg_CreateDevicesFromConfig();
-//#endif
 }
 
-void UpdateInputState(u32 port) {
-}
+void UpdateInputState(u32 port) {}
 
-void UpdateVibration(u32 port, u32 value) {
-}
+void UpdateVibration(u32 port, u32 value) {}
 
 void handle_key(int dckey, int state, int player)
 {
@@ -433,6 +428,14 @@ void handle_trig(u8* dckey, int state, int player)
         case OEDCAnalogRight:
             joyx[player] = value * INT8_MAX;
             break;
+        case OEDCAnalogL:
+            printf("Ltrigger value %f",value);
+            handle_trig(lt, value, (int)player);
+            break;
+        case OEDCAnalogR:
+            printf("RTrigger value %f",value);
+            handle_trig(rt, value, (int)player);
+            break;
         default:
             break;
     }
@@ -464,12 +467,6 @@ void handle_trig(u8* dckey, int state, int player)
             break;
         case OEDCButtonY:
             handle_key(Btn_Y, 1, (int)player);
-            break;
-        case OEDCAnalogL:
-            handle_trig(lt, 1, (int)player);
-            break;
-        case OEDCAnalogR:
-            handle_trig(rt, 1, (int)player);
             break;
         case OEDCButtonStart:
             handle_key(Btn_Start, 1, (int)player);
