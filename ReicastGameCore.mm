@@ -403,14 +403,6 @@ void handle_key(int dckey, int state, int player)
         kcode[player-1] |= dckey;
 }
 
-void handle_trig(u8* dckey, int state, int player)
-{
-    if (state)
-        dckey[player-1] = 255;
-    else
-        dckey[player-1] = 0;
-}
-
 - (oneway void)didMoveDCJoystickDirection:(OEDCButton)button withValue:(CGFloat)value forPlayer:(NSUInteger)player
 {
     player -= 1;
@@ -430,11 +422,11 @@ void handle_trig(u8* dckey, int state, int player)
             break;
         case OEDCAnalogL:
             printf("Ltrigger value %f",value);
-            handle_trig(lt, value, (int)player);
+            lt[player] = value ? 255 : 0;
             break;
         case OEDCAnalogR:
             printf("RTrigger value %f",value);
-            handle_trig(rt, value, (int)player);
+            rt[player] = value ? 255 : 0;
             break;
         default:
             break;
@@ -504,12 +496,6 @@ void handle_trig(u8* dckey, int state, int player)
             break;
         case OEDCButtonY:
             handle_key(Btn_Y, 0, (int)player);
-            break;
-        case OEDCAnalogL:
-            handle_trig(lt, 0, (int)player);
-            break;
-        case OEDCAnalogR:
-            handle_trig(rt, 0, (int)player);
             break;
         case OEDCButtonStart:
             handle_key(Btn_Start, 0, (int)player);
