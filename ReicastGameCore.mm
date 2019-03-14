@@ -26,21 +26,27 @@
 
 #import "ReicastGameCore.h"
 #import <OpenEmuBase/OERingBuffer.h>
-#import <OpenGL/gl3.h>
 
 #include "oslib/audiostream.h"
 #include "audiobackend_openemu.h"
 
+#import <Carbon/Carbon.h>
+
 #include "types.h"
-#include "rend/rend.h"
+#include "hw/maple/maple_cfg.h"
 #include <sys/stat.h>
+
+#include <OpenGL/gl3.h>
+
+#include "rend/rend.h"
 #include <functional>
 
-#include "maple_cfg.h"
 #include "cfg.h"
 
 #define SAMPLERATE 44100
 #define SIZESOUNDBUFFER 44100 / 60 * 4
+#define DC_PLATFORM DC_PLATFORM_DREAMCAST
+#define DC_Contollers 1
 
 typedef std::function<void(bool status, const std::string &message, void *cbUserData)> Callback;
 void dc_savestate(const std::string &fileName, Callback callback, void *cbUserData);
@@ -53,15 +59,10 @@ void dc_loadstate(const std::string &fileName, Callback callback, void *cbUserDa
     NSString *romPath;
     NSString *romFile;
     NSString *autoLoadStatefileName;
-    
-    GLuint iFBO;
 }
 @end
 
 __weak ReicastGameCore *_current;
-
-//void dc_savestate(string fileName);
-//void dc_loadstate(string fileName);
 
 @implementation ReicastGameCore
 
@@ -86,7 +87,10 @@ __weak ReicastGameCore *_current;
     free(_soundBuffer);
 }
 
-# pragma mark - Execution
+bool system_init;
+char bios_dir[1024];
+
+# pragma mark - Reicast Execution functions
 
 int msgboxf(const wchar* text,unsigned int type,...)
 {
@@ -119,33 +123,56 @@ int dc_init(int argc,wchar* argv[]);
 void dc_run();
 void dc_term();
 void dc_stop();
+bool dc_is_running();
+void dc_reset();
+bool dc_pause_emu();
+void dc_resume_emu(bool continue_running);
 
 volatile bool has_init = false;
-- (void)emuthread {
-    settings.profile.run_counts = 0;
+
+# pragma mark - Reicast thread
+
+- (void)emuthread
+{
+    settings.profile.run_counts=0;
     common_linux_setup();
+    
+    //Register our own audio backend
+    RegisterAudioBackend(&audiobackend_openemu);
     
     // Set battery save dir
     NSURL *SavesDirectory = [NSURL fileURLWithPath:[self batterySavesDirectoryPath]];
     
-    // create the data directory
-   [[NSFileManager defaultManager] createDirectoryAtURL:[[NSURL fileURLWithPath:[self supportDirectoryPath]] URLByAppendingPathComponent:@"data"] withIntermediateDirectories:YES attributes:nil error:nil];
-    
     //create the save direcory for the game
     [[NSFileManager defaultManager] createDirectoryAtURL:[SavesDirectory URLByAppendingPathComponent:romFile] withIntermediateDirectories:YES attributes:nil error:nil];
     
+    // create the data directory
+    [[NSFileManager defaultManager] createDirectoryAtURL:[[NSURL fileURLWithPath:[self supportDirectoryPath]] URLByAppendingPathComponent:@"data"] withIntermediateDirectories:YES attributes:nil error:nil];
+    
+    //setup the user and system directories
     set_user_config_dir([[self supportDirectoryPath] UTF8String]);
     set_user_data_dir([SavesDirectory URLByAppendingPathComponent:romFile].path.fileSystemRepresentation);
-    add_system_data_dir([[self biosDirectoryPath] fileSystemRepresentation]);
-    add_system_config_dir([[self biosDirectoryPath] fileSystemRepresentation]);
+    add_system_data_dir([[self supportDirectoryPath] UTF8String]);
     
-    char* argv[] = { "reicast", (char*)[romPath UTF8String] };
-    dc_init(2,argv);
-
+    //Setup the bios directory
+    snprintf(bios_dir,sizeof(bios_dir),"%s%c",[[self biosDirectoryPath] UTF8String],'/');
+    
+    char* argv[] = { "reicast" };
+    
+    dc_init(1,argv);
+    
     has_init = true;
     
     dc_run();
+    
+    has_init = false;
+    
+    dc_term();
+    
+    system_init = false;
 }
+
+# pragma mark - Execution
 
 - (BOOL)loadFileAtPath:(NSString *)path error:(NSError **)error
 {
@@ -159,47 +186,62 @@ volatile bool has_init = false;
 {
     screen_width = videoWidth;
     screen_height = videoHeight;
-    RegisterAudioBackend(&audiobackend_openemu);
-    
-    // Set player to 4
-    cfgSaveInt("players", "nb", 4);
-    
-    //Disable the OE framelimiting
-    [self.renderDelegate suspendFPSLimiting];
 }
 
 - (void)stopEmulation
 {
+//    dc_pause_emu();
+    //dc_stop();
+   //
+    printf ("Stopping Emulation Core");
+    
+    if (dc_is_running()) {
+        dc_stop();
+        dc_resume_emu(false);
+    }
+    
     [super stopEmulation];
-    dc_term();
 }
 
 - (void)resetEmulation
 {
+    dc_pause_emu();
+    dc_reset();
+    dc_resume_emu(true);
 }
 
 - (void)executeFrame
 {
-    if (!has_init) {
+    if (!system_init)
+    {
+        //Initialize core gles
         gles_init();
-
+        
+        //start the reicast thread
         [NSThread detachNewThreadSelector:@selector(emuthread) toTarget:self withObject:nil];
-
-        while (!has_init) { ; }
+        
+        //Set the game to the virtual drive
+        cfgSetVirtual ("config", "image", [romPath UTF8String]);
+        
+        system_init = true;
     }
+
+    //System is initialized - render the frames
     
-    
-    if (self.needsDoubleBufferedFBO) {
+    if (!has_init)
+       return;
+
+    if (rend_framePending())
+    {
+        screen_height = videoHeight;
+        screen_width = videoWidth;
+
         [self.renderDelegate presentDoubleBufferedFBO];
-    } else {
-        glBindFramebuffer(GL_FRAMEBUFFER,(GLuint)[[self.renderDelegate presentationFramebuffer] integerValue]);
-    }
-    
-    while (!rend_framePending()){;}
 
-    while (!rend_single_frame()) {;};
-    
-    calcFPS();
+        rend_single_frame();
+
+        calcFPS();
+    }
 }
 
 # pragma mark - Video
@@ -208,12 +250,39 @@ extern int screen_width,screen_height;
 bool rend_framePending();
 bool rend_single_frame();
 bool gles_init();
-double emuFrameInterval = 60;
+
+void os_SetWindowText(const char * text) {
+    puts(text);
+}
+
+void os_DoEvents() {
+}
+
+void os_CreateWindow() {
+}
+
+void* libPvr_GetRenderTarget() {
+    return 0;
+}
+
+void* libPvr_GetRenderSurface() {
+    return 0;
+}
+
+bool gl_init(void*, void*) {
+    return true;
+}
+
+void gl_term() {}
+
+void gl_swap() {}
+
+double emuFrameInterval = 59.94;
 
 void calcFPS(){
     const int spg_clks[4] = { 26944080, 13458568, 13462800, 26944080 };
     u32 pixel_clock = spg_clks[(SPG_CONTROL.full >> 6) & 3];
-    
+
     switch (pixel_clock)
     {
         case 26944080:
@@ -237,35 +306,6 @@ void calcFPS(){
             //info->timing.fps = 50.00; /* (PAL 480  @ 50.00) */
             break;
     }
-}
-void os_SetWindowText(const char * text) {
-    puts(text);
-}
-
-void os_DoEvents() {
-}
-
-void os_CreateWindow() {
-}
-
-void* libPvr_GetRenderTarget() {
-    return 0;
-}
-
-void* libPvr_GetRenderSurface() {
-    return 0;
-}
-
-bool gl_init(void*, void*) {
-    return true;
-}
-
-void gl_term() {
-    
-}
-
-void gl_swap() {
-    glFlush();
 }
 
 - (OEGameCoreRendering)gameCoreRendering
@@ -323,6 +363,9 @@ static void _OESaveStateCallback(bool status, std::string message, void *cbUserD
 {
     void (^block)(BOOL, NSError *) = (__bridge_transfer void(^)(BOOL, NSError *))cbUserData;
     
+    printf ("Callback from State Save/Load %s: %s", status ? "successful" : "failed", message.c_str());
+    
+    dc_resume_emu(true);
     [_current endPausedExecution];
     
     block(status, nil);
@@ -331,7 +374,7 @@ static void _OESaveStateCallback(bool status, std::string message, void *cbUserD
 - (void)saveStateToFileAtPath:(NSString *)fileName completionHandler:(void (^)(BOOL, NSError *))block
 {
     if (has_init) {
-        [self beginPausedExecution];
+       // [self beginPausedExecution];
 
         dc_savestate(fileName.fileSystemRepresentation, _OESaveStateCallback, (__bridge_retained void *)[block copy]);
     }
@@ -346,12 +389,37 @@ static void _OESaveStateCallback(bool status, std::string message, void *cbUserD
         [NSThread detachNewThreadSelector:@selector(autoloadWaitThread) toTarget:self withObject:nil];
         block(true, nil);
     } else {
+        dc_pause_emu();
         [self beginPausedExecution];
         dc_loadstate(fileName.fileSystemRepresentation, _OESaveStateCallback, (__bridge_retained void *)[block copy]);
     }
 }
 
 # pragma mark - Input
+
+void os_SetupInput()
+{
+    // Create contollers, but only put vmu on the first controller
+#if DC_PLATFORM == DC_PLATFORM_DREAMCAST
+    // Create first controller
+    settings.input.maple_devices[0] = MDT_SegaController;
+    settings.input.maple_expansion_devices[0][0] = MDT_SegaVMU;
+    settings.input.maple_expansion_devices[0][1] = MDT_SegaVMU;
+    
+        // Add additional controllers
+        for (int i = 1; i < DC_Contollers; i++)
+        {
+                settings.input.maple_devices[i] = MDT_SegaController;
+                settings.input.maple_expansion_devices[i][0] = MDT_None;
+                settings.input.maple_expansion_devices[i][1] = MDT_None;
+        }
+    mcfg_CreateDevices();
+#endif
+}
+
+void UpdateInputState(u32 port) {}
+
+void UpdateVibration(u32 port, u32 value) {}
 
 int get_mic_data(u8* buffer) { return 0; }
 int push_vmu_screen(u8* buffer) { return 0; }
@@ -386,26 +454,20 @@ enum DCPad
     Axis_Y= 0x20001,
 };
 
-void os_SetupInput()
-{
-  mcfg_CreateDevicesFromConfig();
-}
-
-void UpdateInputState(u32 port) {}
-
-void UpdateVibration(u32 port, u32 value) {}
-
 void handle_key(int dckey, int state, int player)
 {
     if (state)
-        kcode[player-1] &= ~dckey;
+        kcode[player] &= ~dckey;
     else
-        kcode[player-1] |= dckey;
+        kcode[player] |= dckey;
 }
 
 - (oneway void)didMoveDCJoystickDirection:(OEDCButton)button withValue:(CGFloat)value forPlayer:(NSUInteger)player
 {
+    if (player < DC_Contollers) return;
+    
     player -= 1;
+    
     switch (button)
     {
         case OEDCAnalogUp:
@@ -421,11 +483,9 @@ void handle_key(int dckey, int state, int player)
             joyx[player] = value * INT8_MAX;
             break;
         case OEDCAnalogL:
-            printf("Ltrigger value %f",value);
             lt[player] = value ? 255 : 0;
             break;
         case OEDCAnalogR:
-            printf("RTrigger value %f",value);
             rt[player] = value ? 255 : 0;
             break;
         default:
@@ -435,6 +495,10 @@ void handle_key(int dckey, int state, int player)
 
 -(oneway void)didPushDCButton:(OEDCButton)button forPlayer:(NSUInteger)player
 {
+    if (player < DC_Contollers) return;
+    
+    player -= 1;
+    
     switch (button) {
         case OEDCButtonUp:
             handle_key(DPad_Up, 1, (int)player);
@@ -470,6 +534,10 @@ void handle_key(int dckey, int state, int player)
 
 - (oneway void)didReleaseDCButton:(OEDCButton)button forPlayer:(NSUInteger)player
 {
+    if (player < DC_Contollers) return;
+    
+    player -= 1;
+    
     // FIXME: Dpad up/down seems to get set and released on the same frame, making it not do anything.
     // Need to ensure actions last across a frame?
     switch (button) {
