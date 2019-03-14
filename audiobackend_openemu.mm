@@ -34,38 +34,35 @@ static u32 openemu_push(void* frame, u32 samples, bool wait)
     int  SamplesPerFrame = SAMPLERATE / [_current frameInterval] ;
     double PercentOfFrameWithSound = 1.0 * samples / SamplesPerFrame;
     double SingleFrameTime = 1.0 / [_current frameInterval] * 1000000;
-    
+
     //Calculate the maximum amount of time in microseconds it takes to play the samples sent
     uint64_t MaxFrameTime = SingleFrameTime * PercentOfFrameWithSound ;
-    
+
     //Figure out the time since the last partial frame of sound played
     epochDuration = mach_absolute_time() - epochStart;
-    
+
     //start the next epoch
     epochStart = mach_absolute_time();
-    
+
     //Write the sound bytes to the buffer
     [[_current audioBufferAtIndex:0] write:frame maxLength:(size_t)samples * 4];
     
     /* Convert to microeconds */
     epochDuration *= durationMultiplier;
     epochDuration -= lastwaitime;
-    
+
     //If duration was less than max time for sound play, subtract the duration from the max time, and wait the remainder
     //   else no wait is neccessary
     if (epochDuration < MaxFrameTime)
         waitime = (uint)(MaxFrameTime - epochDuration);
     else
         waitime = 0;
-   
-    if (wait) {
-        usleep(waitime);
-        lastwaitime = waitime;
-//      printf ("Sound Push Bytes: %i Wait: %11d", samples, waitime);
-    } else {
-        lastwaitime = 0;
-    }
-    
+
+    //Sleep the thread to keep timing close to being where it should be
+    usleep(waitime);
+    lastwaitime = waitime;
+   // printf ("Sound Push Bytes: %i Wait: %11d", samples, waitime);
+
 	return 1;
 }
 
