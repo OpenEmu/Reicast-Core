@@ -19,24 +19,59 @@
 #include "hw/sh4/sh4_sched.h"
 #include "hw/pvr/Renderer_if.h"
 #include "hw/pvr/spg.h"
+#include "hw/aica/dsp.h"
+#include "imgread/common.h"
 
 void FlushCache();
+void LoadCustom();
+void dc_resume_emu(bool continue_running);
 
-// OpenEmu: Load NV Ram to work around the way Reicast handles System and Users Data
-void LoadNVmem(const string& root);
+settings_t settings;
+// Set if game has corresponding option by default, so that it's not saved in the config
+static bool rtt_to_buffer_game;
+static bool safemode_game;
+static bool tr_poly_depth_mask_game;
+static bool extra_depth_game;
+
+static bool continue_running = false;
+static cMutex mtx_mainloop ;
+static cResetEvent resume_mainloop(false, true);
 
 //OpenEmu:  SaveState Location name and Callback function
 #include <functional>
 string OEStateFilePath;
 typedef std::function<void(bool status, const std::string &message, void *cbUserData)> Callback;
 Callback OECallback;
-void *OEUserData;
 
-settings_t settings;
-static bool continue_running = false;
-static cMutex mtx_serialization ;
-static cMutex mtx_mainloop ;
-static int new_dynarec_setting = -1;
+void *OEUserData;
+static void* dc_loadstate_thread(void* p);
+static void* dc_savestate_thread(void* p);
+extern char bios_dir[1024];
+
+//  OpenEmu SaveState functions
+void dc_savestate(const std::string &fileName, Callback callback, void *cbUserData)
+{
+    printf("Saving State: %s", fileName.c_str());
+    
+    OECallback = callback;
+    OEUserData = cbUserData;
+    OEStateFilePath = fileName;
+
+    cThread thd(dc_savestate_thread,0);
+    thd.Start() ;
+}
+
+void dc_loadstate(const std::string &fileName, Callback callback, void *cbUserData)
+{
+    printf ("Loading State: %s", fileName.c_str());
+    
+    OECallback = callback;
+    OEUserData = cbUserData;
+    OEStateFilePath = fileName;
+
+    cThread thd(dc_loadstate_thread,0);
+    thd.Start() ;
+}
 
 /*
  libndc
@@ -96,7 +131,7 @@ int64_t get_time_usec(void)
 }
 
 
-int GetFile(char *szFileName, char *szParse=0, u32 flags=0)
+int GetFile(char *szFileName, char *szParse /* = 0 */, u32 flags /* = 0 */)
 {
     cfgLoadStr("config","image",szFileName,"null");
     if (strcmp(szFileName,"null")==0)
@@ -152,8 +187,6 @@ s32 plugins_Init()
     //if (s32 rv = libExtDevice_Init())
     //    return rv;
     
-    
-    
     return rv_ok;
 }
 
@@ -191,23 +224,37 @@ void LoadSpecialSettings()
 {
 #if DC_PLATFORM == DC_PLATFORM_DREAMCAST
     printf("Game ID is [%s]\n", reios_product_number);
+    rtt_to_buffer_game = false;
+    safemode_game = false;
+    tr_poly_depth_mask_game = false;
+    extra_depth_game = false;
     
     // Tony Hawk's Pro Skater 2
     if (!strncmp("T13008D", reios_product_number, 7) || !strncmp("T13006N", reios_product_number, 7)
         // Tony Hawk's Pro Skater 1
         || !strncmp("T40205N", reios_product_number, 7)
         // Tony Hawk's Skateboarding
-        || !strncmp("T40204D", reios_product_number, 7))
+        || !strncmp("T40204D", reios_product_number, 7)
+        // Skies of Arcadia
+        || !strncmp("MK-51052", reios_product_number, 8))
+    {
         settings.rend.RenderToTextureBuffer = 1;
+        rtt_to_buffer_game = true;
+    }
     if (!strncmp("HDR-0176", reios_product_number, 8) || !strncmp("RDC-0057", reios_product_number, 8))
+    {
         // Cosmic Smash
         settings.rend.TranslucentPolygonDepthMask = 1;
+        tr_poly_depth_mask_game = true;
+    }
     // Pro Pinball Trilogy
     if (!strncmp("T30701D", reios_product_number, 7)
         // Demolition Racer
         || !strncmp("T15112N", reios_product_number, 7)
         // Star Wars - Episode I - Racer (United Kingdom)
         || !strncmp("T23001D", reios_product_number, 7)
+        // Star Wars - Episode I - Racer (USA)
+        || !strncmp("T23001N", reios_product_number, 7)
         // Record of Lodoss War (EU)
         || !strncmp("T7012D", reios_product_number, 6)
         // Record of Lodoss War (USA)
@@ -217,12 +264,14 @@ void LoadSpecialSettings()
     {
         printf("Enabling Dynarec safe mode for game %s\n", reios_product_number);
         settings.dynarec.safemode = 1;
+        safemode_game = true;
     }
     // NHL 2K2
     if (!strncmp("MK-51182", reios_product_number, 8))
     {
         printf("Enabling Extra depth scaling for game %s\n", reios_product_number);
         settings.rend.ExtraDepthScale = 10000;
+        extra_depth_game = true;
     }
 #elif DC_PLATFORM == DC_PLATFORM_NAOMI || DC_PLATFORM == DC_PLATFORM_ATOMISWAVE
     printf("Game ID is [%s]\n", naomi_game_id);
@@ -231,12 +280,13 @@ void LoadSpecialSettings()
     {
         printf("Enabling Dynarec safe mode for game %s\n", naomi_game_id);
         settings.dynarec.safemode = 1;
+        safemode_game = true;
     }
     if (!strcmp("SAMURAI SPIRITS 6", naomi_game_id))
     {
         printf("Enabling Extra depth scaling for game %s\n", naomi_game_id);
         settings.rend.ExtraDepthScale = 1e26;
-        
+        extra_depth_game = true;
     }
     if (!strcmp("DYNAMIC GOLF", naomi_game_id)
         || !strcmp("SHOOTOUT POOL", naomi_game_id)
@@ -277,7 +327,7 @@ void LoadSpecialSettings()
     {
         printf("Enabling translucent depth multipass for game %s\n", naomi_game_id);
         settings.rend.TranslucentPolygonDepthMask = true;
-        
+        tr_poly_depth_mask_game = true;
     }
 #endif
 }
@@ -290,26 +340,31 @@ void dc_reset()
     sh4_cpu.Reset(false);
 }
 
-#if defined(_ANDROID)
-int reios_init_value;
+static bool init_done;
 
-void reios_init(int argc,wchar* argv[])
-#else
 int dc_init(int argc,wchar* argv[])
-#endif
 {
     setbuf(stdin,0);
     setbuf(stdout,0);
     setbuf(stderr,0);
+    if (init_done)
+    {
+        if(ParseCommandLine(argc,argv))
+        {
+            return 69;
+        }
+        InitSettings();
+        LoadSettings(false);
+        if (DiscSwap())
+            LoadCustom();
+        dc_reset();
+        
+        return 0;
+    }
     if (!_vmem_reserve())
     {
         printf("Failed to alloc mem\n");
-#if defined(_ANDROID)
-        reios_init_value = -1;
-        return;
-#else
         return -1;
-#endif
     }
     
 #if !defined(TARGET_NO_WEBUI) && !defined(TARGET_NO_THREADS)
@@ -318,29 +373,17 @@ int dc_init(int argc,wchar* argv[])
     
     if(ParseCommandLine(argc,argv))
     {
-#if defined(_ANDROID)
-        reios_init_value = 69;
-        return;
-#else
         return 69;
-#endif
     }
     if(!cfgOpen())
     {
         msgboxf("Unable to open config file",MBX_ICONERROR);
-#if defined(_ANDROID)
-        reios_init_value = -4;
-        return;
-#else
         return -4;
-#endif
     }
-    LoadSettings();
-#ifndef _ANDROID
-    os_CreateWindow();
-#endif
+    InitSettings();
+    LoadSettings(false);
     
-    int rv = 0;
+    os_CreateWindow();
     
 #if HOST_OS != OS_DARWIN
 #define DATA_PATH "/data/"
@@ -348,57 +391,36 @@ int dc_init(int argc,wchar* argv[])
 #define DATA_PATH "/"
 #endif
     
-    if (settings.bios.UseReios || !LoadRomFiles(get_readonly_data_path(DATA_PATH)))
-    {
+    //     OpenEmu:  Force to load from OE Bios Directory
+        if (!LoadRomFiles(bios_dir))
+        {
+#ifdef USE_REIOS
         if (!LoadHle(get_readonly_data_path(DATA_PATH)))
         {
-#if defined(_ANDROID)
-            reios_init_value = -4;
-            return;
-#else
-            return -3;
-#endif
+            return -5;
         }
         else
         {
             printf("Did not load bios, using reios\n");
         }
-    } else {
-        // OpenEmu: We have loaded the BIOS and default Flash,
-        //          load the users saved nnvram
-        LoadNVmem(get_writable_data_path("/data/"));
-    }
-
-    if (plugins_Init())
-    {
-#if defined(_ANDROID)
-        reios_init_value = -4;
-        return;
 #else
-        return -3;
+        printf("Cannot find BIOS files\n");
+        return -5;
 #endif
     }
     
-#if defined(_ANDROID)
-}
-
-int dc_init()
-{
-    int rv = 0;
-    if (reios_init_value != 0)
-        return reios_init_value;
-    LoadSpecialSettings();
-#else
+    if (plugins_Init())
+    {
+        return -3;
+    }
+    
     LoadCustom();
-#endif
     
 #if FEAT_SHREC != DYNAREC_NONE
     Get_Sh4Recompiler(&sh4_cpu);
     sh4_cpu.Init();        // Also initialize the interpreter
-
     if(settings.dynarec.Enable)
     {
-       
         printf("Using Recompiler\n");
     }
     else
@@ -412,7 +434,7 @@ int dc_init()
     }
     
     InitAudio();
-
+    
     mem_Init();
     
     mem_map_default();
@@ -424,10 +446,11 @@ int dc_init()
 #elif DC_PLATFORM == DC_PLATFORM_ATOMISWAVE
     mcfg_CreateAtomisWaveControllers();
 #endif
+    init_done = true;
     
     dc_reset();
     
-    return rv;
+    return 0;
 }
 
 bool dc_is_running()
@@ -438,19 +461,26 @@ bool dc_is_running()
 #ifndef TARGET_DISPFRAME
 void dc_run()
 {
+    resume_mainloop.Set();
+    
     while ( true )
     {
+        bool dynarec_enabled = settings.dynarec.Enable;
         continue_running = false ;
         mtx_mainloop.Lock() ;
         sh4_cpu.Run();
         mtx_mainloop.Unlock() ;
         
-        mtx_serialization.Lock() ;
-        mtx_serialization.Unlock() ;
+#ifdef _WIN32
+        // Avoid the looping audio when the emulator is paused
+        TermAudio();
+#endif
+        while (!resume_mainloop.Wait(20))
+            os_DoEvents();
+        resume_mainloop.Set();
         
-        if (new_dynarec_setting != -1 && new_dynarec_setting != settings.dynarec.Enable)
+        if (dynarec_enabled != settings.dynarec.Enable)
         {
-            settings.dynarec.Enable = new_dynarec_setting;
             if (settings.dynarec.Enable)
             {
                 Get_Sh4Recompiler(&sh4_cpu);
@@ -465,21 +495,23 @@ void dc_run()
         }
         if (!continue_running)
             break ;
+#ifdef _WIN32
+        InitAudio();
+#endif
     }
 }
 #endif
 
 void dc_term()
 {
+    printf ("Terminating DC Emu Thread");
     sh4_cpu.Term();
     plugins_Term();
     _vmem_release();
     
     mcfg_DestroyDevices();
     
-#ifndef _ANDROID
     SaveSettings();
-#endif
     SaveRomFiles(get_writable_data_path("/data/"));
     
     TermAudio();
@@ -501,7 +533,10 @@ void dc_pause()
 
 void dc_stop()
 {
-    sh4_cpu.Stop();
+    if (sh4_cpu.IsCpuRunning())
+        sh4_cpu.Stop();
+    else
+        dc_resume_emu(false);
 }
 
 void dc_start()
@@ -509,78 +544,144 @@ void dc_start()
     sh4_cpu.Start();
 }
 
-void LoadSettings()
+void InitSettings()
 {
     settings.dreamcast.RTC            = GetRTC_now();
-#ifndef _ANDROID
-    settings.dynarec.Enable            = cfgLoadInt("config","Dynarec.Enabled", 1)!=0;
-    settings.dynarec.idleskip        = cfgLoadInt("config","Dynarec.idleskip",1)!=0;
-    settings.dynarec.unstable_opt    = cfgLoadInt("config","Dynarec.unstable-opt",0);
-    settings.dynarec.safemode        = cfgLoadInt("config", "Dynarec.safe-mode", 0);
-    //disable_nvmem can't be loaded, because nvmem init is before cfg load
-    settings.dreamcast.cable        = cfgLoadInt("config","Dreamcast.Cable",3);
-    settings.dreamcast.region        = cfgLoadInt("config","Dreamcast.Region",3);
-    settings.dreamcast.broadcast    = cfgLoadInt("config","Dreamcast.Broadcast",4);
-    settings.dreamcast.language     = cfgLoadInt("config","Dreamcast.Language", 6);
-    settings.aica.LimitFPS            = cfgLoadInt("config","aica.LimitFPS",1);
-    settings.aica.NoBatch            = cfgLoadInt("config","aica.NoBatch",0);
-    settings.aica.NoSound            = cfgLoadInt("config","aica.NoSound",0);
-    settings.rend.UseMipmaps        = cfgLoadInt("config","rend.UseMipmaps",1);
-    settings.rend.WideScreen        = cfgLoadInt("config","rend.WideScreen",0);
-    settings.rend.ShowFPS            = cfgLoadInt("config", "rend.ShowFPS", 0);
-    settings.rend.RenderToTextureBuffer = cfgLoadInt("config", "rend.RenderToTextureBuffer", 0);
-    settings.rend.RenderToTextureUpscale = cfgLoadInt("config", "rend.RenderToTextureUpscale", 1);
-    settings.rend.TranslucentPolygonDepthMask = cfgLoadInt("config", "rend.TranslucentPolygonDepthMask", 0);
-    settings.rend.ModifierVolumes    = cfgLoadInt("config","rend.ModifierVolumes",1);
-    settings.rend.Clipping            = cfgLoadInt("config","rend.Clipping",1);
-    settings.rend.TextureUpscale    = cfgLoadInt("config","rend.TextureUpscale", 1);
-    settings.rend.MaxFilteredTextureSize = cfgLoadInt("config","rend.MaxFilteredTextureSize", 256);
-    char extra_depth_scale_str[128];
-    cfgLoadStr("config","rend.ExtraDepthScale", extra_depth_scale_str, "1");
-    settings.rend.ExtraDepthScale = atof(extra_depth_scale_str);
-    if (settings.rend.ExtraDepthScale == 0)
-        settings.rend.ExtraDepthScale = 1.f;
-    settings.rend.CustomTextures = cfgLoadInt("config", "rend.CustomTextures", 0);
-    settings.rend.DumpTextures = cfgLoadInt("config", "rend.DumpTextures", 0);
-    
-    settings.pvr.subdivide_transp    = cfgLoadInt("config","pvr.Subdivide",0);
-    
-    settings.pvr.ta_skip            = cfgLoadInt("config","ta.skip",0);
-    settings.pvr.rend                = cfgLoadInt("config","pvr.rend",0);
-    
-    settings.pvr.MaxThreads        = cfgLoadInt("config", "pvr.MaxThreads", 3);
-    settings.pvr.SynchronousRender    = cfgLoadInt("config", "pvr.SynchronousRendering", 0);
-    
-    settings.debug.SerialConsole    = cfgLoadInt("config", "Debug.SerialConsoleEnabled", 0) != 0;
-    
-    settings.bios.UseReios        = cfgLoadInt("config", "bios.UseReios", 0);
-    settings.reios.ElfFile        = cfgLoadStr("reios", "ElfFile", "");
-    
-    settings.validate.OpenGlChecks = cfgLoadInt("validate", "OpenGlChecks", 0) != 0;
-    
-    settings.input.DCKeyboard = cfgLoadInt("input", "DCKeyboard", 0);
-    settings.input.DCMouse = cfgLoadInt("input", "DCMouse", 0);
-    settings.input.MouseSensitivity = cfgLoadInt("input", "MouseSensitivity", 100);
-    settings.input.JammaSetup = cfgLoadInt("input", "JammaSetup", 0);
-#else
-    // TODO Expose this with JNI
-    settings.rend.Clipping = 1;
+    settings.dynarec.Enable            = true;
+    settings.dynarec.idleskip        = true;
+    settings.dynarec.unstable_opt    = false;
+    settings.dynarec.safemode        = true;
+    settings.dreamcast.cable        = 3;    // TV composite
+    settings.dreamcast.region        = 3;    // default
+    settings.dreamcast.broadcast    = 4;    // default
+    settings.dreamcast.language     = 6;    // default
+    settings.aica.LimitFPS            = true;
+    settings.aica.NoBatch            = false;    // This also controls the DSP. Disabled by default
+    settings.aica.NoSound            = false;
+    settings.rend.UseMipmaps        = true;
+    settings.rend.WideScreen        = false;
+    settings.rend.ShowFPS            = false;
+    settings.rend.RenderToTextureBuffer = false;
     settings.rend.RenderToTextureUpscale = 1;
-    settings.rend.TextureUpscale = 1;
+    settings.rend.TranslucentPolygonDepthMask = false;
+    settings.rend.ModifierVolumes    = true;
+    settings.rend.Clipping            = true;
+    settings.rend.TextureUpscale    = 1;
+    settings.rend.MaxFilteredTextureSize = 256;
+    settings.rend.ExtraDepthScale   = 1.f;
+    settings.rend.CustomTextures    = false;
+    settings.rend.DumpTextures      = false;
+    settings.rend.ScreenScaling     = 100;
     
-    // Configured on a per-game basis
-    settings.rend.ExtraDepthScale = 1.f;
-    settings.dynarec.safemode    = 0;
+    settings.pvr.ta_skip            = 0;
+    settings.pvr.rend                = 0;
+    
+    settings.pvr.MaxThreads            = 3;
+    settings.pvr.SynchronousRender    = true;
+    
+    settings.debug.SerialConsole    = false;
+    
+    settings.bios.UseReios            = 0;
+    settings.reios.ElfFile            = "";
+    
+    settings.validate.OpenGlChecks  = false;
+    
+    settings.input.MouseSensitivity = 100;
     settings.input.JammaSetup = 0;
-#endif
-    
-    settings.pvr.HashLogFile    = cfgLoadStr("testing", "ta.HashLogFile", "");
-    settings.pvr.HashCheckFile    = cfgLoadStr("testing", "ta.HashCheckFile", "");
+    for (int i = 0; i < MAPLE_PORTS; i++)
+    {
+        settings.input.maple_devices[i] = i == 0 ? MDT_SegaController : MDT_None;
+        settings.input.maple_expansion_devices[i][0] = i == 0 ? MDT_SegaVMU : MDT_None;
+        settings.input.maple_expansion_devices[i][1] = i == 0 ? MDT_SegaVMU : MDT_None;
+    }
     
 #if SUPPORT_DISPMANX
-    settings.dispmanx.Width        = cfgLoadInt("dispmanx","width",640);
-    settings.dispmanx.Height    = cfgLoadInt("dispmanx","height",480);
-    settings.dispmanx.Keep_Aspect    = cfgLoadBool("dispmanx","maintain_aspect",true);
+    settings.dispmanx.Width        = 640;
+    settings.dispmanx.Height    = 480;
+    settings.dispmanx.Keep_Aspect = true;
+#endif
+    
+#if (HOST_OS != OS_LINUX || defined(_ANDROID) || defined(TARGET_PANDORA))
+    settings.aica.BufferSize = 2048;
+#else
+    settings.aica.BufferSize = 1024;
+#endif
+    
+#if USE_OMX
+    settings.omx.Audio_Latency    = 100;
+    settings.omx.Audio_HDMI        = true;
+#endif
+}
+
+void LoadSettings(bool game_specific)
+{
+    const char *config_section = game_specific ? cfgGetGameId() : "config";
+    const char *input_section = game_specific ? cfgGetGameId() : "input";
+    
+    settings.dynarec.Enable            = cfgLoadBool(config_section, "Dynarec.Enabled", settings.dynarec.Enable);
+    settings.dynarec.idleskip        = cfgLoadBool(config_section, "Dynarec.idleskip", settings.dynarec.idleskip);
+    settings.dynarec.unstable_opt    = cfgLoadBool(config_section, "Dynarec.unstable-opt", settings.dynarec.unstable_opt);
+    settings.dynarec.safemode        = cfgLoadBool(config_section, "Dynarec.safe-mode", settings.dynarec.safemode);
+    //disable_nvmem can't be loaded, because nvmem init is before cfg load
+    settings.dreamcast.cable        = cfgLoadInt(config_section, "Dreamcast.Cable", settings.dreamcast.cable);
+    settings.dreamcast.region        = cfgLoadInt(config_section, "Dreamcast.Region", settings.dreamcast.region);
+    settings.dreamcast.broadcast    = cfgLoadInt(config_section, "Dreamcast.Broadcast", settings.dreamcast.broadcast);
+    settings.dreamcast.language     = cfgLoadInt(config_section, "Dreamcast.Language", settings.dreamcast.language);
+    settings.aica.LimitFPS            = cfgLoadBool(config_section, "aica.LimitFPS", settings.aica.LimitFPS);
+    settings.aica.NoBatch            = cfgLoadBool(config_section, "aica.NoBatch", settings.aica.NoBatch);
+    settings.aica.NoSound            = cfgLoadBool(config_section, "aica.NoSound", settings.aica.NoSound);
+    settings.rend.UseMipmaps        = cfgLoadBool(config_section, "rend.UseMipmaps", settings.rend.UseMipmaps);
+    settings.rend.WideScreen        = cfgLoadBool(config_section, "rend.WideScreen", settings.rend.WideScreen);
+    settings.rend.ShowFPS            = cfgLoadBool(config_section, "rend.ShowFPS", settings.rend.ShowFPS);
+    settings.rend.RenderToTextureBuffer = cfgLoadBool(config_section, "rend.RenderToTextureBuffer", settings.rend.RenderToTextureBuffer);
+    settings.rend.RenderToTextureUpscale = cfgLoadInt(config_section, "rend.RenderToTextureUpscale", settings.rend.RenderToTextureUpscale);
+    settings.rend.TranslucentPolygonDepthMask = cfgLoadBool(config_section, "rend.TranslucentPolygonDepthMask", settings.rend.TranslucentPolygonDepthMask);
+    settings.rend.ModifierVolumes    = cfgLoadBool(config_section, "rend.ModifierVolumes", settings.rend.ModifierVolumes);
+    settings.rend.Clipping            = cfgLoadBool(config_section, "rend.Clipping", settings.rend.Clipping);
+    settings.rend.TextureUpscale    = cfgLoadInt(config_section, "rend.TextureUpscale", settings.rend.TextureUpscale);
+    settings.rend.MaxFilteredTextureSize = cfgLoadInt(config_section,"rend.MaxFilteredTextureSize", settings.rend.MaxFilteredTextureSize);
+    std::string extra_depth_scale_str = cfgLoadStr(config_section,"rend.ExtraDepthScale", "");
+    if (!extra_depth_scale_str.empty())
+    {
+        settings.rend.ExtraDepthScale = atof(extra_depth_scale_str.c_str());
+        if (settings.rend.ExtraDepthScale == 0)
+            settings.rend.ExtraDepthScale = 1.f;
+    }
+    settings.rend.CustomTextures    = cfgLoadBool(config_section, "rend.CustomTextures", settings.rend.CustomTextures);
+    settings.rend.DumpTextures      = cfgLoadBool(config_section, "rend.DumpTextures", settings.rend.DumpTextures);
+    settings.rend.ScreenScaling     = cfgLoadInt(config_section, "rend.ScreenScaling", settings.rend.ScreenScaling);
+    settings.rend.ScreenScaling = min(max(1, settings.rend.ScreenScaling), 100);
+    
+    settings.pvr.ta_skip            = cfgLoadInt(config_section, "ta.skip", settings.pvr.ta_skip);
+    settings.pvr.rend                = cfgLoadInt(config_section, "pvr.rend", settings.pvr.rend);
+    
+    settings.pvr.MaxThreads            = cfgLoadInt(config_section, "pvr.MaxThreads", settings.pvr.MaxThreads);
+    settings.pvr.SynchronousRender    = cfgLoadBool(config_section, "pvr.SynchronousRendering", settings.pvr.SynchronousRender);
+    
+    settings.debug.SerialConsole    = cfgLoadBool(config_section, "Debug.SerialConsoleEnabled", settings.debug.SerialConsole);
+    
+    settings.bios.UseReios            = cfgLoadBool(config_section, "bios.UseReios", settings.bios.UseReios);
+    settings.reios.ElfFile            = cfgLoadStr(game_specific ? cfgGetGameId() : "reios", "ElfFile", settings.reios.ElfFile.c_str());
+    
+    settings.validate.OpenGlChecks  = cfgLoadBool(game_specific ? cfgGetGameId() : "validate", "OpenGlChecks", settings.validate.OpenGlChecks);
+    
+    settings.input.MouseSensitivity = cfgLoadInt(input_section, "MouseSensitivity", settings.input.MouseSensitivity);
+    settings.input.JammaSetup = cfgLoadInt(input_section, "JammaSetup", settings.input.JammaSetup);
+    for (int i = 0; i < MAPLE_PORTS; i++)
+    {
+        char device_name[32];
+        sprintf(device_name, "device%d", i + 1);
+        settings.input.maple_devices[i] = (MapleDeviceType)cfgLoadInt(input_section, device_name, settings.input.maple_devices[i]);
+        sprintf(device_name, "device%d.1", i + 1);
+        settings.input.maple_expansion_devices[i][0] = (MapleDeviceType)cfgLoadInt(input_section, device_name, settings.input.maple_expansion_devices[i][0]);
+        sprintf(device_name, "device%d.2", i + 1);
+        settings.input.maple_expansion_devices[i][1] = (MapleDeviceType)cfgLoadInt(input_section, device_name, settings.input.maple_expansion_devices[i][1]);
+    }
+    
+#if SUPPORT_DISPMANX
+    settings.dispmanx.Width        = cfgLoadInt(game_specific ? cfgGetGameId() : "dispmanx", "width", settings.dispmanx.Width);
+    settings.dispmanx.Height    = cfgLoadInt(game_specific ? cfgGetGameId() : "dispmanx", "height", settings.dispmanx.Height);
+    settings.dispmanx.Keep_Aspect    = cfgLoadBool(game_specific ? cfgGetGameId() : "dispmanx", "maintain_aspect", settings.dispmanx.Keep_Aspect);
 #endif
     
 #if (HOST_OS != OS_LINUX || defined(_ANDROID) || defined(TARGET_PANDORA))
@@ -590,8 +691,8 @@ void LoadSettings()
 #endif
     
 #if USE_OMX
-    settings.omx.Audio_Latency    = cfgLoadInt("omx","audio_latency",100);
-    settings.omx.Audio_HDMI        = cfgLoadBool("omx","audio_hdmi",true);
+    settings.omx.Audio_Latency    = cfgLoadInt(game_specific ? cfgGetGameId() : "omx", "audio_latency", settings.omx.Audio_Latency);
+    settings.omx.Audio_HDMI        = cfgLoadBool(game_specific ? cfgGetGameId() : "omx", "audio_hdmi", settings.omx.Audio_HDMI);
 #endif
     
     /*
@@ -617,42 +718,62 @@ void LoadCustom()
     char *reios_software_name = naomi_game_id;
 #endif
     
-    LoadSpecialSettings();    // Default per-game settings
+    // Default per-game settings
+    LoadSpecialSettings();
     
-    if (reios_software_name[0] != '\0')
-        cfgSaveStr(reios_id, "software.name", reios_software_name);
-    settings.dynarec.Enable        = cfgGameInt(reios_id,"Dynarec.Enabled", settings.dynarec.Enable ? 1 : 0) != 0;
-    settings.dynarec.idleskip    = cfgGameInt(reios_id,"Dynarec.idleskip", settings.dynarec.idleskip ? 1 : 0) != 0;
-    settings.dynarec.unstable_opt    = cfgGameInt(reios_id,"Dynarec.unstable-opt", settings.dynarec.unstable_opt);
-    settings.dynarec.safemode    = cfgGameInt(reios_id,"Dynarec.safe-mode", settings.dynarec.safemode);
-    settings.rend.ModifierVolumes    = cfgGameInt(reios_id,"rend.ModifierVolumes", settings.rend.ModifierVolumes);
-    settings.rend.Clipping        = cfgGameInt(reios_id,"rend.Clipping", settings.rend.Clipping);
+    cfgSetGameId(reios_id);
     
-    settings.pvr.subdivide_transp    = cfgGameInt(reios_id,"pvr.Subdivide", settings.pvr.subdivide_transp);
-    
-    settings.pvr.ta_skip        = cfgGameInt(reios_id,"ta.skip", settings.pvr.ta_skip);
-    settings.pvr.rend        = cfgGameInt(reios_id,"pvr.rend", settings.pvr.rend);
-    
-    settings.pvr.MaxThreads        = cfgGameInt(reios_id, "pvr.MaxThreads", settings.pvr.MaxThreads);
-    settings.pvr.SynchronousRender    = cfgGameInt(reios_id, "pvr.SynchronousRendering", settings.pvr.SynchronousRender);
-#if DC_PLATFORM == DC_PLATFORM_DREAMCAST
-    settings.dreamcast.cable = cfgGameInt(reios_id, "Dreamcast.Cable", settings.dreamcast.cable);
-    settings.dreamcast.region = cfgGameInt(reios_id, "Dreamcast.Region", settings.dreamcast.region);
-    settings.dreamcast.broadcast = cfgGameInt(reios_id, "Dreamcast.Broadcast", settings.dreamcast.broadcast);
-#endif
+    // Reload per-game settings
+    LoadSettings(true);
 }
 
 void SaveSettings()
 {
-    cfgSaveInt("config","Dynarec.Enabled",        settings.dynarec.Enable);
-#if DC_PLATFORM == DC_PLATFORM_DREAMCAST
-    cfgSaveInt("config","Dreamcast.Cable",        settings.dreamcast.cable);
-    cfgSaveInt("config","Dreamcast.Region",        settings.dreamcast.region);
-    cfgSaveInt("config","Dreamcast.Broadcast",    settings.dreamcast.broadcast);
-#endif
+    cfgSaveBool("config", "Dynarec.Enabled", settings.dynarec.Enable);
+    cfgSaveInt("config", "Dreamcast.Cable", settings.dreamcast.cable);
+    cfgSaveInt("config", "Dreamcast.Region", settings.dreamcast.region);
+    cfgSaveInt("config", "Dreamcast.Broadcast", settings.dreamcast.broadcast);
+    cfgSaveBool("config", "Dynarec.idleskip", settings.dynarec.idleskip);
+    cfgSaveBool("config", "Dynarec.unstable-opt", settings.dynarec.unstable_opt);
+    if (!safemode_game || !settings.dynarec.safemode)
+        cfgSaveBool("config", "Dynarec.safe-mode", settings.dynarec.safemode);
+    cfgSaveInt("config", "Dreamcast.Language", settings.dreamcast.language);
+    cfgSaveBool("config", "aica.LimitFPS", settings.aica.LimitFPS);
+    cfgSaveBool("config", "aica.NoBatch", settings.aica.NoBatch);
+    cfgSaveBool("config", "rend.WideScreen", settings.rend.WideScreen);
+    cfgSaveBool("config", "rend.ShowFPS", settings.rend.ShowFPS);
+    if (!rtt_to_buffer_game || !settings.rend.RenderToTextureBuffer)
+        cfgSaveBool("config", "rend.RenderToTextureBuffer", settings.rend.RenderToTextureBuffer);
+    cfgSaveInt("config", "rend.RenderToTextureUpscale", settings.rend.RenderToTextureUpscale);
+    cfgSaveBool("config", "rend.ModifierVolumes", settings.rend.ModifierVolumes);
+    cfgSaveBool("config", "rend.Clipping", settings.rend.Clipping);
+    cfgSaveInt("config", "rend.TextureUpscale", settings.rend.TextureUpscale);
+    cfgSaveInt("config", "rend.MaxFilteredTextureSize", settings.rend.MaxFilteredTextureSize);
+    cfgSaveBool("config", "rend.CustomTextures", settings.rend.CustomTextures);
+    cfgSaveBool("config", "rend.DumpTextures", settings.rend.DumpTextures);
+    cfgSaveInt("config", "rend.ScreenScaling", settings.rend.ScreenScaling);
+    cfgSaveInt("config", "ta.skip", settings.pvr.ta_skip);
+    cfgSaveInt("config", "pvr.rend", settings.pvr.rend);
+    
+    cfgSaveInt("config", "pvr.MaxThreads", settings.pvr.MaxThreads);
+    cfgSaveBool("config", "pvr.SynchronousRendering", settings.pvr.SynchronousRender);
+    
+    cfgSaveBool("config", "Debug.SerialConsoleEnabled", settings.debug.SerialConsole);
+    cfgSaveInt("input", "MouseSensitivity", settings.input.MouseSensitivity);
+    for (int i = 0; i < MAPLE_PORTS; i++)
+    {
+        char device_name[32];
+        sprintf(device_name, "device%d", i + 1);
+        cfgSaveInt("input", device_name, (s32)settings.input.maple_devices[i]);
+        sprintf(device_name, "device%d.1", i + 1);
+        cfgSaveInt("input", device_name, (s32)settings.input.maple_expansion_devices[i][0]);
+        sprintf(device_name, "device%d.2", i + 1);
+        cfgSaveInt("input", device_name, (s32)settings.input.maple_expansion_devices[i][1]);
+    }
+    
 }
 
-bool wait_until_dc_running()
+static bool wait_until_dc_running()
 {
     int64_t start_time = get_time_usec() ;
     const int64_t FIVE_SECONDS = 5*1000000 ;
@@ -667,7 +788,7 @@ bool wait_until_dc_running()
     return true ;
 }
 
-bool acquire_mainloop_lock()
+static bool acquire_mainloop_lock()
 {
     bool result = false ;
     int64_t start_time = get_time_usec() ;
@@ -681,81 +802,74 @@ bool acquire_mainloop_lock()
     return result ;
 }
 
-void dc_enable_dynarec(bool enable)
+bool dc_pause_emu()
 {
-#if FEAT_SHREC != DYNAREC_NONE
-    continue_running = true;
-    new_dynarec_setting = enable;
-    dc_stop();
+    if (sh4_cpu.IsCpuRunning())
+    {
+#ifndef TARGET_NO_THREADS
+        if (!wait_until_dc_running()) {
+            printf("Can't open settings - dc loop kept running\n");
+            return false;
+        }
+        resume_mainloop.Reset();
+        
+        dc_stop();
+        
+        if (!acquire_mainloop_lock())
+        {
+            printf("Can't open settings - could not acquire main loop lock\n");
+            continue_running = true;
+            resume_mainloop.Set();
+            return false;
+        }
+#else
+        dc_stop();
 #endif
+    }
+    return true;
 }
 
-void cleanup_serialize(void *data)
+void dc_resume_emu(bool continue_running)
+{
+    if (!sh4_cpu.IsCpuRunning())
+    {
+        ::continue_running = continue_running;
+        rend_cancel_emu_wait();
+        resume_mainloop.Set();
+        mtx_mainloop.Unlock();
+    }
+}
+
+static void cleanup_serialize(void *data)
 {
     if ( data != NULL )
         free(data) ;
     
-    continue_running = true ;
-    mtx_serialization.Unlock() ;
-    mtx_mainloop.Unlock() ;
-    
+    dc_resume_emu(true);
 }
 
 static string get_savestate_file_path()
 {
     //OpenEmu:
-     return OEStateFilePath;
-    
-//    char image_path[512];
-//    cfgLoadStr("config", "image", image_path, "./");
-//    string state_file = image_path;
-//    size_t lastindex = state_file.find_last_of("/");
-//    if (lastindex != -1)
-//        state_file = state_file.substr(lastindex + 1);
-//    lastindex = state_file.find_last_of(".");
-//    if (lastindex != -1)
-//        state_file = state_file.substr(0, lastindex);
-//    state_file = state_file + ".state";
-//    return get_writable_data_path("/data/") + state_file;
+    return OEStateFilePath;
 }
 
-void* dc_savestate_thread(void* p)
+static void* dc_savestate_thread(void* p)
 {
-    printf("Starting SaveState.\n") ;
-    
     string filename;
     unsigned int total_size = 0 ;
     void *data = NULL ;
     void *data_ptr = NULL ;
     FILE *f ;
     
-    mtx_serialization.Lock() ;
-    if ( !wait_until_dc_running()) {
-        printf("Failed to save state - dc loop kept running\n") ;
-        mtx_serialization.Unlock() ;
-        
-        if (OECallback) OECallback(false, "Failed to load state - dc loop kept running", OEUserData);
+    if (!dc_pause_emu())
         return NULL;
-    }
-    
-    dc_stop() ;
-    
-    if ( !acquire_mainloop_lock() )
-    {
-        printf("Failed to save state - could not acquire main loop lock\n") ;
-        continue_running = true ;
-        mtx_serialization.Unlock() ;
-        
-        if (OECallback) OECallback(false, "Failed to load state - could not acquire main loop lock", OEUserData);
-        return NULL;
-    }
     
     if ( ! dc_serialize(&data, &total_size) )
     {
         printf("Failed to save state - could not initialize total size\n") ;
-        cleanup_serialize(data) ;
-        
         if (OECallback) OECallback(false, "Failed to save state - could not initialize total size.", OEUserData);
+        cleanup_serialize(data) ;
         return NULL;
     }
     
@@ -763,9 +877,8 @@ void* dc_savestate_thread(void* p)
     if ( data == NULL )
     {
         printf("Failed to save state - could not malloc %d bytes", total_size) ;
-        cleanup_serialize(data) ;
-        
         if (OECallback) OECallback(false, "Failed to load state - could not allocate Memory", OEUserData);
+        cleanup_serialize(data) ;
         return NULL;
     }
     
@@ -774,9 +887,8 @@ void* dc_savestate_thread(void* p)
     if ( ! dc_serialize(&data_ptr, &total_size) )
     {
         printf("Failed to save state - could not serialize data\n") ;
-        cleanup_serialize(data) ;
-        
         if (OECallback) OECallback(false, "Failed to load state - could not serialize data", OEUserData);
+        cleanup_serialize(data) ;
         return NULL;
     }
     
@@ -786,23 +898,22 @@ void* dc_savestate_thread(void* p)
     if ( f == NULL )
     {
         printf("Failed to save state - could not open %s for writing\n", filename.c_str()) ;
-        cleanup_serialize(data) ;
-        
         if (OECallback) OECallback(false, "Failed to load state - could not open file for writing", OEUserData);
+        cleanup_serialize(data) ;
         return NULL;
     }
     
     fwrite(data, 1, total_size, f) ;
     fclose(f);
     
-    cleanup_serialize(data) ;
-    printf("Saved state to %s\n size %d", filename.c_str(), total_size) ;
-    
     if (OECallback) OECallback(true, "Successfully Saved State", OEUserData);
+    printf("Saved state to %s\n size %d", filename.c_str(), total_size) ;
+    cleanup_serialize(data) ;
+    
     return NULL;
 }
 
-void* dc_loadstate_thread(void* p)
+static void* dc_loadstate_thread(void* p)
 {
     string filename;
     unsigned int total_size = 0 ;
@@ -810,45 +921,8 @@ void* dc_loadstate_thread(void* p)
     void *data_ptr = NULL ;
     FILE *f ;
     
-    mtx_serialization.Lock() ;
-    if ( !wait_until_dc_running()) {
-        printf("Failed to load state - dc loop kept running\n") ;
-        mtx_serialization.Unlock() ;
-        
-        if (OECallback) OECallback(false, "Failed to load state. Error in the file system.", OEUserData);
+    if (!dc_pause_emu())
         return NULL;
-    }
-    
-    dc_stop() ;
-    
-    if ( !acquire_mainloop_lock() )
-    {
-        printf("Failed to load state - could not acquire main loop lock\n") ;
-        continue_running = true ;
-        mtx_serialization.Unlock() ;
-        
-        if (OECallback) OECallback(false, "Failed to load state - could not acquire main loop lock.", OEUserData);
-        return NULL;
-    }
-    
-    if ( ! dc_serialize(&data, &total_size) )
-    {
-        printf("Failed to load state - could not initialize total size\n") ;
-        cleanup_serialize(data) ;
-        
-        if (OECallback) OECallback(false, "Failed to load state - could not initialize total size.", OEUserData);
-        return NULL;
-    }
-    
-    data = malloc(total_size) ;
-    if ( data == NULL )
-    {
-        printf("Failed to load state - could not malloc %d bytes", total_size) ;
-        cleanup_serialize(data) ;
-        
-        if (OECallback) OECallback(false, "Failed to load state - could not allocate Memory", OEUserData);
-        return NULL;
-    }
     
     filename = get_savestate_file_path();
     f = fopen(filename.c_str(), "rb") ;
@@ -856,9 +930,19 @@ void* dc_loadstate_thread(void* p)
     if ( f == NULL )
     {
         printf("Failed to load state - could not open %s for reading\n", filename.c_str()) ;
-        cleanup_serialize(data) ;
-        
         if (OECallback) OECallback(false, "Failed to load state - could not open file for readming", OEUserData);
+        cleanup_serialize(data) ;
+        return NULL;
+    }
+    fseek(f, 0, SEEK_END);
+    total_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    data = malloc(total_size) ;
+    if ( data == NULL )
+    {
+        printf("Failed to load state - could not malloc %d bytes", total_size) ;
+        if (OECallback) OECallback(false, "Failed to load state - could not allocate Memory", OEUserData);
+        cleanup_serialize(data) ;
         return NULL;
     }
     
@@ -876,42 +960,33 @@ void* dc_loadstate_thread(void* p)
     if ( ! dc_unserialize(&data_ptr, &total_size) )
     {
         printf("Failed to load state - could not unserialize data\n") ;
-        cleanup_serialize(data) ;
-        
         if (OECallback) OECallback(false, "Failed to load state - could not unserialize data", OEUserData);
+        cleanup_serialize(data) ;
         return NULL;
     }
     
+    dsp.dyndirty = true;
     sh4_sched_ffts();
     CalculateSync();
     
-    cleanup_serialize(data) ;
     printf("Loaded state from %s size %d\n", filename.c_str(), total_size) ;
-    rend_cancel_emu_wait();
+   
+    cleanup_serialize(data) ;
     
     if (OECallback) OECallback(true, "Loaded state from file", OEUserData);
+    
     return NULL;
 }
 
-//  OpenEmu SaveState functions
-void dc_savestate(const std::string &fileName, Callback callback, void *cbUserData)
-{
-    printf("Called Save Svaestate\n") ;
-    
-    OECallback = callback;
-    OEUserData = cbUserData;
-    OEStateFilePath = fileName;
 
+void dc_savestate()
+{
     cThread thd(dc_savestate_thread,0);
     thd.Start() ;
 }
 
-void dc_loadstate(const std::string &fileName, Callback callback, void *cbUserData)
+void dc_loadstate()
 {
-    OECallback = callback;
-    OEUserData = cbUserData;
-    OEStateFilePath = fileName;
-
     cThread thd(dc_loadstate_thread,0);
     thd.Start() ;
 }
