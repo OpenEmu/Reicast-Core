@@ -38,11 +38,14 @@ static u32 openemu_push(void* frame, u32 samples, bool wait)
     //Calculate the maximum amount of time in microseconds it takes to play the samples sent
     uint64_t MaxFrameTime = SingleFrameTime * PercentOfFrameWithSound ;
 
+    // Store the absolute current machine time for the timming calculations
+    uint64_t  NOW = mach_absolute_time();
+    
     //Figure out the time since the last partial frame of sound played
-    epochDuration = mach_absolute_time() - epochStart;
+    epochDuration =  NOW - epochStart;
 
     //start the next epoch
-    epochStart = mach_absolute_time();
+    epochStart = NOW;
 
     //Write the sound bytes to the buffer
     [[_current audioBufferAtIndex:0] write:frame maxLength:(size_t)samples * 4];
