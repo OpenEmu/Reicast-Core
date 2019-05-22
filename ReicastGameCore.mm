@@ -42,6 +42,7 @@
 #include <functional>
 
 #include "cfg.h"
+#include "rend/gui.h"
 
 #define SAMPLERATE 44100
 #define SIZESOUNDBUFFER 44100 / 60 * 4
@@ -49,8 +50,6 @@
 #define DC_Contollers 1
 
 typedef std::function<void(bool status, const std::string &message, void *cbUserData)> Callback;
-void dc_savestate(const std::string &fileName, Callback callback, void *cbUserData);
-void dc_loadstate(const std::string &fileName, Callback callback, void *cbUserData);
 
 @interface ReicastGameCore () <OEDCSystemResponderClient>
 {
@@ -92,19 +91,6 @@ char bios_dir[1024];
 
 # pragma mark - Reicast Execution functions
 
-int msgboxf(const wchar* text,unsigned int type,...)
-{
-    va_list args;
-    
-    wchar temp[2048];
-    va_start(args, type);
-    vsprintf(temp, text, args);
-    va_end(args);
-    
-    puts(temp);
-    return 0;
-}
-
 int darw_printf(const wchar* text,...) {
     va_list args;
     
@@ -119,20 +105,20 @@ int darw_printf(const wchar* text,...) {
 }
 
 void common_linux_setup();
-int dc_init(int argc,wchar* argv[]);
-void dc_run();
+int reicast_init(int argc,wchar* argv[]);
 void dc_term();
 void dc_stop();
-bool dc_is_running();
-void dc_reset();
-bool dc_pause_emu();
-void dc_resume_emu(bool continue_running);
+void dc_request_reset();
+void dc_resume();
+void rend_init_renderer();
+void rend_term_renderer();
+int dc_start_game(const char *path);
 
 volatile bool has_init = false;
 
 # pragma mark - Reicast thread
 
-- (void)emuthread
+- (void)emu_init
 {
     settings.profile.run_counts=0;
     common_linux_setup();
@@ -157,19 +143,14 @@ volatile bool has_init = false;
     //Setup the bios directory
     snprintf(bios_dir,sizeof(bios_dir),"%s%c",[[self biosDirectoryPath] UTF8String],'/');
     
+    //Initialize core gles
+    rend_init_renderer();
+    
     char* argv[] = { "reicast" };
     
-    dc_init(1,argv);
+    reicast_init(0, NULL);
     
     has_init = true;
-    
-    dc_run();
-    
-    has_init = false;
-    
-    dc_term();
-    
-    system_init = false;
 }
 
 # pragma mark - Execution
@@ -190,49 +171,45 @@ volatile bool has_init = false;
 
 - (void)stopEmulation
 {
-//    dc_pause_emu();
-    //dc_stop();
-   //
-    printf ("Stopping Emulation Core");
+
+    NSLog(@"Stopping Emulation Core");
+    //We need this sleep for now until I find a better way of making sure the save is completed
+    usleep (10000);
     
-    if (dc_is_running()) {
-        dc_stop();
-        dc_resume_emu(false);
-    }
+    dc_term();
+    
+    has_init = false;
     
     [super stopEmulation];
 }
 
 - (void)resetEmulation
 {
-    dc_pause_emu();
-    dc_reset();
-    dc_resume_emu(true);
+    dc_request_reset();
 }
 
 - (void)executeFrame
 {
-    if (!system_init)
+    if (!system_init && !has_init)
     {
-        //Initialize core gles
-        gles_init();
-        
-        //start the reicast thread
-        [NSThread detachNewThreadSelector:@selector(emuthread) toTarget:self withObject:nil];
-        
         //Set the game to the virtual drive
         cfgSetVirtual ("config", "image", [romPath UTF8String]);
         
-        system_init = true;
+        //start the reicast core
+        [self emu_init];
+        
+        gui_state = Closed;
+        
+        dc_start_game([romPath UTF8String]);
     }
 
     //System is initialized - render the frames
-    
     if (!has_init)
        return;
 
     if (rend_framePending())
     {
+        system_init = true;
         screen_height = videoHeight;
         screen_width = videoWidth;
 
@@ -249,7 +226,6 @@ volatile bool has_init = false;
 extern int screen_width,screen_height;
 bool rend_framePending();
 bool rend_single_frame();
-bool gles_init();
 
 void os_SetWindowText(const char * text) {
     puts(text);
@@ -347,36 +323,38 @@ void calcFPS(){
 
 # pragma mark - Save States
 
+void dc_savestate();
+void dc_loadstate();
+void dc_SetStateName (const std::string &fileName);
+
 - (void)autoloadWaitThread
 {
     @autoreleasepool
     {
+        [self beginPausedExecution];
+        
         //Wait here until we get the signal for full initialization
-        while (!has_init)
+        while (!system_init)
             usleep (10000);
         
-        dc_loadstate(autoLoadStatefileName.fileSystemRepresentation, nil ,nil);
+        dc_SetStateName(autoLoadStatefileName.fileSystemRepresentation);
+        dc_loadstate();
+        
+        [self endPausedExecution];
+        
     }
-}
-
-static void _OESaveStateCallback(bool status, std::string message, void *cbUserData)
-{
-    void (^block)(BOOL, NSError *) = (__bridge_transfer void(^)(BOOL, NSError *))cbUserData;
-    
-    printf ("Callback from State Save/Load %s: %s", status ? "successful" : "failed", message.c_str());
-    
-    dc_resume_emu(true);
-    [_current endPausedExecution];
-    
-    block(status, nil);
 }
 
 - (void)saveStateToFileAtPath:(NSString *)fileName completionHandler:(void (^)(BOOL, NSError *))block
 {
     if (has_init) {
-       // [self beginPausedExecution];
-
-        dc_savestate(fileName.fileSystemRepresentation, _OESaveStateCallback, (__bridge_retained void *)[block copy]);
+       [self beginPausedExecution];
+        
+        dc_SetStateName(fileName.fileSystemRepresentation);
+        dc_savestate();
+        
+        [self endPausedExecution];
+        block(true, nil);
     }
 }
 
@@ -384,15 +362,19 @@ static void _OESaveStateCallback(bool status, std::string message, void *cbUserD
 {
     if (!has_init) {
         //Start a separate thread to load
-        autoLoadStatefileName = fileName;
+       autoLoadStatefileName = fileName;
         
         [NSThread detachNewThreadSelector:@selector(autoloadWaitThread) toTarget:self withObject:nil];
-        block(true, nil);
+       
     } else {
-        dc_pause_emu();
         [self beginPausedExecution];
-        dc_loadstate(fileName.fileSystemRepresentation, _OESaveStateCallback, (__bridge_retained void *)[block copy]);
+ 
+        dc_SetStateName(fileName.fileSystemRepresentation);
+        dc_loadstate();
+        [self endPausedExecution];
     }
+   
+     block(true, nil);
 }
 
 # pragma mark - Input
