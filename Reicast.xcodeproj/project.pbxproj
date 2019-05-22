@@ -234,6 +234,8 @@
 		EE08B8B2220DC7F900BF2CAA /* imgui.cpp in Sources */ = {isa = PBXBuildFile; fileRef = EE08B8AA220DC7F800BF2CAA /* imgui.cpp */; };
 		EE08B8B4220DC7F900BF2CAA /* imgui_demo.cpp in Sources */ = {isa = PBXBuildFile; fileRef = EE08B8AE220DC7F800BF2CAA /* imgui_demo.cpp */; };
 		EE08B8B5220DC7F900BF2CAA /* imgui_draw.cpp in Sources */ = {isa = PBXBuildFile; fileRef = EE08B8B0220DC7F800BF2CAA /* imgui_draw.cpp */; };
+		EE0D71792290596E00D721E9 /* posix_vmem.cpp in Sources */ = {isa = PBXBuildFile; fileRef = EE0D71782290596E00D721E9 /* posix_vmem.cpp */; };
+		EE0D717C22905BE300D721E9 /* gui_util.cpp in Sources */ = {isa = PBXBuildFile; fileRef = EE0D717B22905BE300D721E9 /* gui_util.cpp */; };
 		EE10AED2219232E6002814A4 /* xxhash.c in Sources */ = {isa = PBXBuildFile; fileRef = EE10AED1219232E6002814A4 /* xxhash.c */; };
 		EE10AEDC2192331A002814A4 /* chd.c in Sources */ = {isa = PBXBuildFile; fileRef = EE10AED421923319002814A4 /* chd.c */; };
 		EE10AEDD2192331A002814A4 /* bitstream.c in Sources */ = {isa = PBXBuildFile; fileRef = EE10AED521923319002814A4 /* bitstream.c */; };
@@ -801,6 +803,10 @@
 		EE08B8AE220DC7F800BF2CAA /* imgui_demo.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = imgui_demo.cpp; sourceTree = "<group>"; };
 		EE08B8AF220DC7F800BF2CAA /* roboto_medium.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = roboto_medium.h; sourceTree = "<group>"; };
 		EE08B8B0220DC7F800BF2CAA /* imgui_draw.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = imgui_draw.cpp; sourceTree = "<group>"; };
+		EE0D7176228F83CA00D721E9 /* version.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = version.h; sourceTree = "<group>"; };
+		EE0D71782290596E00D721E9 /* posix_vmem.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = posix_vmem.cpp; sourceTree = "<group>"; };
+		EE0D717A22905BE200D721E9 /* gui_util.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = gui_util.h; sourceTree = "<group>"; };
+		EE0D717B22905BE300D721E9 /* gui_util.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = gui_util.cpp; sourceTree = "<group>"; };
 		EE10AED0219232E6002814A4 /* xxhash.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = xxhash.h; sourceTree = "<group>"; };
 		EE10AED1219232E6002814A4 /* xxhash.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = xxhash.c; sourceTree = "<group>"; };
 		EE10AED321923319002814A4 /* cdrom.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = cdrom.h; sourceTree = "<group>"; };
@@ -1562,6 +1568,7 @@
 		08169BAB1BD9EFED00BD740D /* linux */ = {
 			isa = PBXGroup;
 			children = (
+				EE0D71782290596E00D721E9 /* posix_vmem.cpp */,
 				08169BAC1BD9EFED00BD740D /* common.cpp */,
 				08169BAD1BD9EFED00BD740D /* context.cpp */,
 				08169BAE1BD9EFED00BD740D /* context.h */,
@@ -1635,6 +1642,8 @@
 		08169BE71BD9EFED00BD740D /* rend */ = {
 			isa = PBXGroup;
 			children = (
+				EE0D717B22905BE300D721E9 /* gui_util.cpp */,
+				EE0D717A22905BE200D721E9 /* gui_util.h */,
 				EE08B8A1220DC7BC00BF2CAA /* gui.cpp */,
 				EE08B8A0220DC7BC00BF2CAA /* gui.h */,
 				08169BEA1BD9EFED00BD740D /* gles */,
@@ -1721,6 +1730,7 @@
 		EE08144921913448007FD1AB /* Compatibility */ = {
 			isa = PBXGroup;
 			children = (
+				EE0D7176228F83CA00D721E9 /* version.h */,
 				EE08144C21913448007FD1AB /* nullDC.cpp */,
 			);
 			path = Compatibility;
@@ -2192,6 +2202,7 @@
 			developmentRegion = English;
 			hasScannedForEncodings = 0;
 			knownRegions = (
+				English,
 				en,
 			);
 			mainGroup = 8CAFA78E1785AA9900647A96;
@@ -2328,6 +2339,7 @@
 				08169C211BD9EFED00BD740D /* pngwutil.c in Sources */,
 				EE51F4B3220A373400BCC098 /* m1cartridge.cpp in Sources */,
 				08169C3A1BD9EFED00BD740D /* zip_close.c in Sources */,
+				EE0D717C22905BE300D721E9 /* gui_util.cpp in Sources */,
 				EE51F4B2220A373400BCC098 /* decrypt.cpp in Sources */,
 				08169C451BD9EFED00BD740D /* zip_error_to_str.c in Sources */,
 				08169CC91BD9EFEE00BD740D /* audiobackend_alsa.cpp in Sources */,
@@ -2355,6 +2367,7 @@
 				EE0815082191393D007FD1AB /* pico_arp.c in Sources */,
 				08169C191BD9EFED00BD740D /* pngrio.c in Sources */,
 				EE1FB87D2203769C0083411F /* stream_decoder.c in Sources */,
+				EE0D71792290596E00D721E9 /* posix_vmem.cpp in Sources */,
 				08169C9C1BD9EFEE00BD740D /* spg.cpp in Sources */,
 				EE08153321923210007FD1AB /* dns.cpp in Sources */,
 				08169C691BD9EFEE00BD740D /* zip_unchange.c in Sources */,
@@ -2663,7 +2676,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
-					/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include,
+					"\"$(SRCROOT)/Compatibility\"",
 					"\"$(SRCROOT)\"",
 					"\"$(SRCROOT)/reicast-emulator/core/deps\"",
 					"\"$(SRCROOT)/reicast-emulator/core\"",
@@ -2671,6 +2684,7 @@
 					"\"$(SRCROOT)/reicast-emulator/core/deps/picotcp\"/**",
 					"\"$(SRCROOT)/reicast-emulator/core/deps/flac/include\"",
 					"\"$(SRCROOT)/reicast-emulator/core/deps/flac/src/libFLAC/include\"",
+					/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include,
 				);
 				INFOPLIST_FILE = Info.plist;
 				INSTALL_PATH = "\"$(USER_LIBRARY_DIR)/Application Support/OpenEmu/Cores\"";
@@ -2722,7 +2736,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
-					/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include,
+					"\"$(SRCROOT)/Compatibility\"",
 					"\"$(SRCROOT)\"",
 					"\"$(SRCROOT)/reicast-emulator/core/deps\"",
 					"\"$(SRCROOT)/reicast-emulator/core\"",
@@ -2730,6 +2744,7 @@
 					"\"$(SRCROOT)/reicast-emulator/core/deps/picotcp\"/**",
 					"\"$(SRCROOT)/reicast-emulator/core/deps/flac/include\"",
 					"\"$(SRCROOT)/reicast-emulator/core/deps/flac/src/libFLAC/include\"",
+					/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include,
 				);
 				INFOPLIST_FILE = Info.plist;
 				INSTALL_PATH = "\"$(USER_LIBRARY_DIR)/Application Support/OpenEmu/Cores\"";
