@@ -653,7 +653,7 @@
 		08169BF91BD9EFED00BD740D /* stdclass.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = stdclass.cpp; sourceTree = "<group>"; };
 		08169BFA1BD9EFED00BD740D /* stdclass.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = stdclass.h; sourceTree = "<group>"; };
 		08169BFB1BD9EFED00BD740D /* types.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = types.h; sourceTree = "<group>"; };
-		08E24C2C1BA2437900EEA1A5 /* OEDCSystemResponderClient.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = OEDCSystemResponderClient.h; path = ../OpenEmu/Dreamcast/OEDCSystemResponderClient.h; sourceTree = "<group>"; };
+		08E24C2C1BA2437900EEA1A5 /* OEDCSystemResponderClient.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = OEDCSystemResponderClient.h; path = ../OpenEmu/SystemPlugins/Dreamcast/OEDCSystemResponderClient.h; sourceTree = "<group>"; };
 		08E24C2D1BA2489000EEA1A5 /* Reicast-Prefix.pch */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "Reicast-Prefix.pch"; sourceTree = SOURCE_ROOT; };
 		8CAFA7B41785AF4200647A96 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = System/Library/Frameworks/Cocoa.framework; sourceTree = SDKROOT; };
 		8CAFA7B71785AF4200647A96 /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
@@ -1724,7 +1724,6 @@
 				08E24C2D1BA2489000EEA1A5 /* Reicast-Prefix.pch */,
 			);
 			name = "Supporting Files";
-			path = PPSSPP;
 			sourceTree = "<group>";
 		};
 		EE08144921913448007FD1AB /* Compatibility */ = {
@@ -2573,6 +2572,7 @@
 				DEAD_CODE_STRIPPING = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				EXCLUDED_ARCHS = arm64;
 				GCC_C_LANGUAGE_STANDARD = c99;
 				GCC_OPTIMIZATION_LEVEL = 0;
 				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
@@ -2590,7 +2590,6 @@
 				OTHER_CFLAGS = "";
 				SDKROOT = macosx;
 				USE_HEADERMAP = YES;
-				VALID_ARCHS = x86_64;
 				WARNING_CFLAGS = "";
 			};
 			name = Debug;
@@ -2616,6 +2615,7 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				EXCLUDED_ARCHS = arm64;
 				GCC_C_LANGUAGE_STANDARD = c99;
 				GCC_OPTIMIZATION_LEVEL = s;
 				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
@@ -2632,7 +2632,6 @@
 				OTHER_CFLAGS = "";
 				SDKROOT = macosx;
 				USE_HEADERMAP = YES;
-				VALID_ARCHS = x86_64;
 				WARNING_CFLAGS = "";
 			};
 			name = Release;
