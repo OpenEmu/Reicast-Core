@@ -1,70 +1,82 @@
 #import "audiobackend_openemu.h"
 #import "ReicastGameCore.h"
-#include <mach/mach_time.h>
 #import <OpenEmuBase/OERingBuffer.h>
-#import <chrono>
+#import <time.h>
+
+#include "hw/pvr/Renderer_if.h"
 
 #define SAMPLERATE  44100
 
-uint waitime, lastwaitime;
-
-mach_timebase_info_data_t info;
-uint64_t epochStart;
-uint64_t epochDuration;
-
-double durationMultiplier;
+// Time (in nanoseconds, CLOCK_UPTIME_RAW) at which the audio written so far has
+// been played. Zero until the first push.
+static uint64_t pushDeadline;
 
 static void openemu_init()
 {
-    mach_timebase_info(&info);
-    epochStart = mach_absolute_time();
-    lastwaitime = 0;
-    durationMultiplier =  (info.numer/ info.denom) / 1000.0 ;  //Converts mach time to microseconds
+    pushDeadline = 0;
+    // Emulation is paced here, so it must not also wait for the presentation
+    // loop (see rend_async in hw/pvr/Renderer_if.cpp).
+    rend_async = true;
 }
 
+// Reicast emulates on its own thread and uses the audio backend as its frame
+// limiter: the blocking backends wait until the samples they queued have been
+// played, and that wait is what keeps the emulator at real time. OpenEmu only
+// paces the thread that presents finished frames, so the emulation thread has
+// to be throttled here.
+//
+// Throttling to a fixed 44100 samples/s would be fragile, because that rate
+// only matches the audio device on average and OERingBuffer refuses to read at
+// all while fewer than twice the requested bytes are queued - any shortfall
+// shows up as periodic dropouts. A single overlong sleep is enough to cause
+// them, which is what the rhythmic crackle was: the previous implementation
+// slept the chunk duration per push and never made up for usleep overshooting,
+// so production ran about 2% below the device rate and the buffer was pinned
+// at the underflow threshold.
+//
+// So instead the deadline advances by the duration of the chunk plus a
+// correction towards a target fill level of the ring buffer: queued too little
+// and the next chunk is treated as slightly shorter, queued too much and it is
+// treated as slightly longer. The emulation rate thereby follows the device
+// clock without drifting, and the queue keeps enough audio for
+// AVAudioSourceNode's render callbacks.
 static u32 openemu_push(void* frame, u32 samples, bool wait)
 {
-    //Reicast is using the sound buffer as timing.  OpenEmu sound uses multiple
-    //  buffers so we have no way to wait that I've found
-    //We need to wait for sound to play before returning to the emulator core
-    //  we calculate the time that is needed in microseconds to play the current sound
-    //  and subtract the time it took since the last sound samples were played
-    
-    //Calcutale Changes in frame-sound timing.  In case frame interval or samples count changed
-    int  SamplesPerFrame = SAMPLERATE / [_current frameInterval] ;
-    double PercentOfFrameWithSound = 1.0 * samples / SamplesPerFrame;
-    double SingleFrameTime = 1.0 / [_current frameInterval] * 1000000;
-
-    //Calculate the maximum amount of time in microseconds it takes to play the samples sent
-    uint64_t MaxFrameTime = SingleFrameTime * PercentOfFrameWithSound ;
-
-    // Store the absolute current machine time for the timming calculations
-    uint64_t  NOW = mach_absolute_time();
-    
-    //Figure out the time since the last partial frame of sound played
-    epochDuration =  NOW - epochStart;
-
-    //start the next epoch
-    epochStart = NOW;
+    OERingBuffer *ring = (OERingBuffer *)[_current audioBufferAtIndex:0];
 
     //Write the sound bytes to the buffer
     [[_current audioBufferAtIndex:0] write:frame maxLength:(size_t)samples * 4];
-    
-    /* Convert to microeconds */
-    epochDuration *= durationMultiplier;
-    epochDuration -= lastwaitime;
 
-    //If duration was less than max time for sound play, subtract the duration from the max time, and wait the remainder
-    //   else no wait is neccessary
-    if (epochDuration < MaxFrameTime)
-        waitime = (uint)(MaxFrameTime - epochDuration);
-    else
-        waitime = 0;
+    const int64_t nsPerSample = 1000000000LL / SAMPLERATE;
+    // 16-bit stereo, so four bytes per sample frame. The emulation loses a few
+    // percent of its time to the render thread, and the level settles where the
+    // resulting correction covers that, a little below the target - hence half
+    // the buffer (about 90 ms) rather than a quarter. That still leaves the
+    // usual case well clear of OERingBuffer's read threshold of two 2048-byte
+    // slices.
+    const int64_t targetBytes = (int64_t)ring.length / 2;
+    const int64_t errorFrames = ((int64_t)ring.availableBytes - targetBytes) / 4;
+    // Correct 5% of the level error per chunk. With 512 samples per chunk the
+    // settling time is around a second, slow enough not to modulate the rate.
+    const int64_t correction = errorFrames * nsPerSample / 20;
 
-    //Sleep the thread to keep timing close to being where it should be
-    usleep(waitime);
-    lastwaitime = waitime;
-   // printf ("Sound Push Bytes: %i Wait: %11d", samples, waitime);
+    const uint64_t now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+    const int64_t chunk = (int64_t)samples * nsPerSample;
+
+    // Start a new schedule on the first push, and resynchronise when the
+    // deadline is far behind (paused emulation, scheduling hiccup); catching up
+    // by running the emulator as fast as possible would overflow the buffers.
+    if (pushDeadline == 0 || now > pushDeadline + 100000000ULL)
+        pushDeadline = now;
+
+    pushDeadline = (uint64_t)((int64_t)pushDeadline + chunk + correction);
+
+    if (pushDeadline > now)
+    {
+        uint64_t remaining = pushDeadline - now;
+        struct timespec request = { (time_t)(remaining / 1000000000ULL), (long)(remaining % 1000000000ULL) };
+        nanosleep(&request, NULL);
+    }
 
 	return 1;
 }

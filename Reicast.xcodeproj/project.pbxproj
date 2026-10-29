@@ -22,6 +22,23 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		E0C0C0000000000000000004 /* rec_arm64.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E0C0C0000000000000000003 /* rec_arm64.cpp */; };
+		E0C0C0000000000000000007 /* assembler-aarch64.cc in Sources */ = {isa = PBXBuildFile; fileRef = E0C0C0000000000000000006 /* assembler-aarch64.cc */; };
+		E0C0C0000000000000000009 /* cpu-aarch64.cc in Sources */ = {isa = PBXBuildFile; fileRef = E0C0C0000000000000000008 /* cpu-aarch64.cc */; };
+		E0C0C000000000000000000B /* cpu-features-auditor-aarch64.cc in Sources */ = {isa = PBXBuildFile; fileRef = E0C0C000000000000000000A /* cpu-features-auditor-aarch64.cc */; };
+		E0C0C000000000000000000D /* decoder-aarch64.cc in Sources */ = {isa = PBXBuildFile; fileRef = E0C0C000000000000000000C /* decoder-aarch64.cc */; };
+		E0C0C000000000000000000F /* disasm-aarch64.cc in Sources */ = {isa = PBXBuildFile; fileRef = E0C0C000000000000000000E /* disasm-aarch64.cc */; };
+		E0C0C0000000000000000011 /* instructions-aarch64.cc in Sources */ = {isa = PBXBuildFile; fileRef = E0C0C0000000000000000010 /* instructions-aarch64.cc */; };
+		E0C0C0000000000000000013 /* instrument-aarch64.cc in Sources */ = {isa = PBXBuildFile; fileRef = E0C0C0000000000000000012 /* instrument-aarch64.cc */; };
+		E0C0C0000000000000000015 /* logic-aarch64.cc in Sources */ = {isa = PBXBuildFile; fileRef = E0C0C0000000000000000014 /* logic-aarch64.cc */; };
+		E0C0C0000000000000000017 /* macro-assembler-aarch64.cc in Sources */ = {isa = PBXBuildFile; fileRef = E0C0C0000000000000000016 /* macro-assembler-aarch64.cc */; };
+		E0C0C0000000000000000019 /* operands-aarch64.cc in Sources */ = {isa = PBXBuildFile; fileRef = E0C0C0000000000000000018 /* operands-aarch64.cc */; };
+		E0C0C000000000000000001B /* pointer-auth-aarch64.cc in Sources */ = {isa = PBXBuildFile; fileRef = E0C0C000000000000000001A /* pointer-auth-aarch64.cc */; };
+		E0C0C000000000000000001D /* simulator-aarch64.cc in Sources */ = {isa = PBXBuildFile; fileRef = E0C0C000000000000000001C /* simulator-aarch64.cc */; };
+		E0C0C000000000000000001F /* code-buffer-vixl.cc in Sources */ = {isa = PBXBuildFile; fileRef = E0C0C000000000000000001E /* code-buffer-vixl.cc */; };
+		E0C0C0000000000000000021 /* compiler-intrinsics-vixl.cc in Sources */ = {isa = PBXBuildFile; fileRef = E0C0C0000000000000000020 /* compiler-intrinsics-vixl.cc */; };
+		E0C0C0000000000000000023 /* cpu-features.cc in Sources */ = {isa = PBXBuildFile; fileRef = E0C0C0000000000000000022 /* cpu-features.cc */; };
+		E0C0C0000000000000000025 /* utils-vixl.cc in Sources */ = {isa = PBXBuildFile; fileRef = E0C0C0000000000000000024 /* utils-vixl.cc */; };
 		08169C011BD9EFED00BD740D /* cfg.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 08169A3E1BD9EFED00BD740D /* cfg.cpp */; };
 		08169C021BD9EFED00BD740D /* cl.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 08169A401BD9EFED00BD740D /* cl.cpp */; };
 		08169C031BD9EFED00BD740D /* ini.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 08169A411BD9EFED00BD740D /* ini.cpp */; };
@@ -329,6 +346,24 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		E0C0C0000000000000000003 /* rec_arm64.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = "rec_arm64.cpp"; sourceTree = "<group>"; };
+		E0C0C0000000000000000005 /* arm64_regalloc.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "arm64_regalloc.h"; sourceTree = "<group>"; };
+		E0C0C0000000000000000006 /* assembler-aarch64.cc */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = "aarch64/assembler-aarch64.cc"; sourceTree = "<group>"; };
+		E0C0C0000000000000000008 /* cpu-aarch64.cc */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = "aarch64/cpu-aarch64.cc"; sourceTree = "<group>"; };
+		E0C0C000000000000000000A /* cpu-features-auditor-aarch64.cc */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = "aarch64/cpu-features-auditor-aarch64.cc"; sourceTree = "<group>"; };
+		E0C0C000000000000000000C /* decoder-aarch64.cc */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = "aarch64/decoder-aarch64.cc"; sourceTree = "<group>"; };
+		E0C0C000000000000000000E /* disasm-aarch64.cc */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = "aarch64/disasm-aarch64.cc"; sourceTree = "<group>"; };
+		E0C0C0000000000000000010 /* instructions-aarch64.cc */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = "aarch64/instructions-aarch64.cc"; sourceTree = "<group>"; };
+		E0C0C0000000000000000012 /* instrument-aarch64.cc */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = "aarch64/instrument-aarch64.cc"; sourceTree = "<group>"; };
+		E0C0C0000000000000000014 /* logic-aarch64.cc */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = "aarch64/logic-aarch64.cc"; sourceTree = "<group>"; };
+		E0C0C0000000000000000016 /* macro-assembler-aarch64.cc */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = "aarch64/macro-assembler-aarch64.cc"; sourceTree = "<group>"; };
+		E0C0C0000000000000000018 /* operands-aarch64.cc */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = "aarch64/operands-aarch64.cc"; sourceTree = "<group>"; };
+		E0C0C000000000000000001A /* pointer-auth-aarch64.cc */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = "aarch64/pointer-auth-aarch64.cc"; sourceTree = "<group>"; };
+		E0C0C000000000000000001C /* simulator-aarch64.cc */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = "aarch64/simulator-aarch64.cc"; sourceTree = "<group>"; };
+		E0C0C000000000000000001E /* code-buffer-vixl.cc */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = "code-buffer-vixl.cc"; sourceTree = "<group>"; };
+		E0C0C0000000000000000020 /* compiler-intrinsics-vixl.cc */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = "compiler-intrinsics-vixl.cc"; sourceTree = "<group>"; };
+		E0C0C0000000000000000022 /* cpu-features.cc */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = "cpu-features.cc"; sourceTree = "<group>"; };
+		E0C0C0000000000000000024 /* utils-vixl.cc */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = "utils-vixl.cc"; sourceTree = "<group>"; };
 		08169A211BD9D96D00BD740D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = SOURCE_ROOT; };
 		08169A221BD9EF1B00BD740D /* audiobackend_openemu.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = audiobackend_openemu.h; sourceTree = "<group>"; };
 		08169A231BD9EF1B00BD740D /* audiobackend_openemu.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = audiobackend_openemu.mm; sourceTree = "<group>"; };
@@ -965,9 +1000,42 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		E0C0C0000000000000000001 /* rec-ARM64 */ = {
+			isa = PBXGroup;
+			children = (
+				E0C0C0000000000000000005 /* arm64_regalloc.h */,
+				E0C0C0000000000000000003 /* rec_arm64.cpp */,
+			);
+			path = rec-ARM64;
+			sourceTree = "<group>";
+		};
+		E0C0C0000000000000000002 /* vixl */ = {
+			isa = PBXGroup;
+			children = (
+				E0C0C0000000000000000006 /* assembler-aarch64.cc */,
+				E0C0C000000000000000001E /* code-buffer-vixl.cc */,
+				E0C0C0000000000000000020 /* compiler-intrinsics-vixl.cc */,
+				E0C0C0000000000000000008 /* cpu-aarch64.cc */,
+				E0C0C000000000000000000A /* cpu-features-auditor-aarch64.cc */,
+				E0C0C0000000000000000022 /* cpu-features.cc */,
+				E0C0C000000000000000000C /* decoder-aarch64.cc */,
+				E0C0C000000000000000000E /* disasm-aarch64.cc */,
+				E0C0C0000000000000000010 /* instructions-aarch64.cc */,
+				E0C0C0000000000000000012 /* instrument-aarch64.cc */,
+				E0C0C0000000000000000014 /* logic-aarch64.cc */,
+				E0C0C0000000000000000016 /* macro-assembler-aarch64.cc */,
+				E0C0C0000000000000000018 /* operands-aarch64.cc */,
+				E0C0C000000000000000001A /* pointer-auth-aarch64.cc */,
+				E0C0C000000000000000001C /* simulator-aarch64.cc */,
+				E0C0C0000000000000000024 /* utils-vixl.cc */,
+			);
+			path = vixl;
+			sourceTree = "<group>";
+		};
 		08169A251BD9EFED00BD740D /* core */ = {
 			isa = PBXGroup;
 			children = (
+				E0C0C0000000000000000001 /* rec-ARM64 */,
 				EE81B9E7223ABCD8009C2D4E /* input */,
 				EE51F4B7220A3A0F00BCC098 /* archive */,
 				EE10AF1B21923B17002814A4 /* serialize.cpp */,
@@ -1010,6 +1078,7 @@
 		08169A441BD9EFED00BD740D /* deps */ = {
 			isa = PBXGroup;
 			children = (
+				E0C0C0000000000000000002 /* vixl */,
 				EE08B8A3220DC7F800BF2CAA /* imgui */,
 				EE1FB83C2203769C0083411F /* flac */,
 				EE10AEEB21923A19002814A4 /* lzma */,
@@ -2262,6 +2331,23 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E0C0C0000000000000000004 /* in Sources */,
+				E0C0C0000000000000000007 /* in Sources */,
+				E0C0C0000000000000000009 /* in Sources */,
+				E0C0C000000000000000000B /* in Sources */,
+				E0C0C000000000000000000D /* in Sources */,
+				E0C0C000000000000000000F /* in Sources */,
+				E0C0C0000000000000000011 /* in Sources */,
+				E0C0C0000000000000000013 /* in Sources */,
+				E0C0C0000000000000000015 /* in Sources */,
+				E0C0C0000000000000000017 /* in Sources */,
+				E0C0C0000000000000000019 /* in Sources */,
+				E0C0C000000000000000001B /* in Sources */,
+				E0C0C000000000000000001D /* in Sources */,
+				E0C0C000000000000000001F /* in Sources */,
+				E0C0C0000000000000000021 /* in Sources */,
+				E0C0C0000000000000000023 /* in Sources */,
+				E0C0C0000000000000000025 /* in Sources */,
 				08169C3B1BD9EFED00BD740D /* zip_delete.c in Sources */,
 				EE08150E2191393D007FD1AB /* pico_dns_common.c in Sources */,
 				08169C931BD9EFEE00BD740D /* maple_if.cpp in Sources */,
@@ -2583,7 +2669,6 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				EXCLUDED_ARCHS = arm64;
 				GCC_C_LANGUAGE_STANDARD = c99;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_OPTIMIZATION_LEVEL = 0;
@@ -2638,7 +2723,6 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				EXCLUDED_ARCHS = arm64;
 				GCC_C_LANGUAGE_STANDARD = c99;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_OPTIMIZATION_LEVEL = s;
@@ -2702,6 +2786,7 @@
 					"\"$(SRCROOT)/Compatibility\"",
 					"\"$(SRCROOT)\"",
 					"\"$(SRCROOT)/reicast-emulator/core/deps\"",
+					"\"$(SRCROOT)/reicast-emulator/core/deps/vixl\"",
 					"\"$(SRCROOT)/reicast-emulator/core\"",
 					"\"$(SRCROOT)/reicast-emulator/core/khronos\"",
 					"\"$(SRCROOT)/reicast-emulator/core/deps/picotcp\"/**",
@@ -2763,6 +2848,7 @@
 					"\"$(SRCROOT)/Compatibility\"",
 					"\"$(SRCROOT)\"",
 					"\"$(SRCROOT)/reicast-emulator/core/deps\"",
+					"\"$(SRCROOT)/reicast-emulator/core/deps/vixl\"",
 					"\"$(SRCROOT)/reicast-emulator/core\"",
 					"\"$(SRCROOT)/reicast-emulator/core/khronos\"",
 					"\"$(SRCROOT)/reicast-emulator/core/deps/picotcp\"/**",
